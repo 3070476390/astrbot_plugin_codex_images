@@ -19,7 +19,7 @@ const settings = Object.fromEntries(Object.entries(schema).map(([key, value]) =>
       await route.fulfill({ path: path.join(root, 'views/dashboard', name), contentType: name.endsWith('.js') ? 'text/javascript' : name.endsWith('.css') ? 'text/css' : 'text/html' });
     });
     await page.addInitScript(settings => {
-      let state = {version: '0.4.0', settings, account: {status: 'signed_out', message: '尚未登录统一账号。'}, quota: null, login_pending: false, busy: false, active_tasks: 0};
+      let state = {version: '0.5.0', settings, account: {status: 'signed_out', message: '尚未登录统一账号。'}, quota: null, login_pending: false, busy: false, active_tasks: 0};
       window.quotaMode = 'ready';
       window.quotaCalls = 0;
       window.setBusy = value => {state.busy = value;};
@@ -66,6 +66,25 @@ const settings = Object.fromEntries(Object.entries(schema).map(([key, value]) =>
     await page.locator('#save').click();
     await page.getByText('设置已保存，将用于下一次任务。').waitFor();
     assert.equal(await page.locator('#users-summary').innerText(), '1 位用户 + 管理员');
+    // Enabling all users keeps the existing allowlist for later restoration.
+    assert.equal(await page.locator('#allow_all_users').isChecked(), false);
+    await page.locator('#allow_all_users').check();
+    assert.equal(await page.locator('#allowed_users').isDisabled(), true);
+    assert.equal(await page.locator('#users-summary').innerText(), '1 位用户 + 管理员', 'unsaved draft must not change active summary');
+    await page.locator('#reset').click();
+    assert.equal(await page.locator('#allow_all_users').isChecked(), false);
+    assert.equal(await page.locator('#allowed_users').isDisabled(), false);
+    await page.locator('#allow_all_users').check();
+    await page.locator('#save').click();
+    assert.equal(await page.locator('#users-summary').innerText(), '所有用户');
+    assert.equal(await page.locator('#allowed_users').inputValue(), 'qq_bot:123456789');
+    await page.locator('#allow_all_users').uncheck();
+    await page.locator('#save').click();
+    assert.equal(await page.locator('#users-summary').innerText(), '1 位用户 + 管理员');
+    assert.equal(await page.locator('#allowed_users').isDisabled(), false);
+    assert.equal(await page.locator('#allowed_users').inputValue(), 'qq_bot:123456789');
+    await page.locator('#allow_all_users').check();
+    await page.locator('#save').click();
     await page.locator('#login').click();
     assert.equal(await page.locator('#device-code').inputValue(), 'TEST-1234');
     assert.equal(await page.locator('#device-panel').isVisible(), true);
@@ -78,6 +97,8 @@ const settings = Object.fromEntries(Object.entries(schema).map(([key, value]) =>
     assert.equal(await page.locator('#model').inputValue(), 'draft-model');
     assert.equal(await page.locator('#device-panel').isVisible(), false);
     assert.equal(await page.locator('#device-code').inputValue(), '');
+    assert.equal(await page.locator('#allow_all_users').isChecked(), true);
+    assert.equal(await page.locator('#users-summary').innerText(), '所有用户');
     await page.evaluate(() => {window.rejectSave = true;});
     await page.locator('#save').click();
     await page.getByText('模拟保存失败，请重试').waitFor();
@@ -118,12 +139,13 @@ const settings = Object.fromEntries(Object.entries(schema).map(([key, value]) =>
     await page.locator('#account_mode').selectOption('personal');
     await page.locator('#save').click();
     await page.getByText('独立账号模式：请私聊发送 /codex额度 查询自己的账号。').waitFor();
+    assert.equal(await page.locator('#users-summary').innerText(), '所有独立账号用户');
     assert.equal(await page.locator('#refresh-quota').isDisabled(), true);
     await page.locator('#logout').click();
     await page.getByText('统一账号已退出。').first().waitFor();
     assert.equal(await page.locator('progress').count(), 0);
     assert.deepEqual(errors, []);
-    console.log('PASS: account/settings flow, quota windows and missing/error states, explicit refresh, busy/personal restrictions, logout cleanup, mobile layout and themes');
+    console.log('PASS: all-users switch/save/reset, allowlist restoration, account/settings flow, quota states, busy/personal restrictions, logout cleanup, mobile layout and themes');
   } finally {
     await browser.close();
   }

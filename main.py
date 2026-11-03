@@ -52,11 +52,12 @@ class CodexImagesPlugin(Star):
         if not platform or not sender:
             raise PluginError("无法识别当前平台或用户，未执行账号操作。")
         identity = f"{platform}:{sender}"
-        if self.account_mode == "shared":
-            if not event.is_admin() and identity not in allowed:
-                raise PluginError("你不在统一账号的使用名单中，请联系管理员添加 平台实例ID:用户ID。")
-        elif allowed and identity not in allowed:
-            raise PluginError("你不在插件使用名单中，请联系管理员。")
+        if self.config.get("allow_all_users", False) is not True:
+            if self.account_mode == "shared":
+                if not event.is_admin() and identity not in allowed:
+                    raise PluginError("你不在统一账号的使用名单中，请联系管理员添加 平台实例ID:用户ID。")
+            elif allowed and identity not in allowed:
+                raise PluginError("你不在插件使用名单中，请联系管理员。")
         return user_key(str(platform), str(sender))
 
     @filter.command("codex帮助")

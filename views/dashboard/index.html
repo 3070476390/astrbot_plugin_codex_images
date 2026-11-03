@@ -8,7 +8,7 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand"><span class="brand-icon" aria-hidden="true">✦</span><div><h1>Codex 绘图</h1><p>账号与绘图设置</p></div><span class="version">v0.4.0</span></div>
+    <div class="brand"><span class="brand-icon" aria-hidden="true">✦</span><div><h1>Codex 绘图</h1><p>账号与绘图设置</p></div><span class="version">v0.5.0</span></div>
     <div class="connection"><span id="connection-dot" class="dot"></span><span id="connection-text">正在连接插件…</span></div>
   </header>
   <main>
@@ -51,7 +51,8 @@
             <fieldset id="settings-fields" disabled>
               <div class="section-label"><span>01</span><h4>账号与访问</h4></div>
               <div class="field"><label for="account_mode">账号模式</label><select id="account_mode" name="account_mode"><option value="shared">统一绘图账号 · 管理员登录</option><option value="personal">每人独立账号 · 用户私聊登录</option></select><p class="hint">统一模式下，允许的聊天用户共享此账号的订阅额度。独立模式会继续使用各自原有的账号。</p></div>
-              <div class="field"><div class="label-line"><label for="allowed_users">允许使用的用户</label><span>每行一项</span></div><textarea id="allowed_users" name="allowed_users" rows="4" placeholder="qq_bot:123456789&#10;telegram_bot:987654321" spellcheck="false"></textarea><p id="allowlist-hint" class="hint">格式：平台实例ID:用户ID，可通过机器人 /sid 查询。统一模式下，聊天管理员始终可用；名单为空时仅管理员可用。</p></div>
+              <label class="toggle-row all-users-toggle" for="allow_all_users"><span><strong>允许所有用户使用</strong><small>开启后无需逐个添加用户。统一账号模式下，所有调用共用该账号的订阅额度。</small></span><input id="allow_all_users" name="allow_all_users" type="checkbox" role="switch"></label>
+              <div class="field"><div class="label-line"><label for="allowed_users">允许使用的用户</label><span>每行一项</span></div><textarea id="allowed_users" name="allowed_users" rows="4" placeholder="qq_bot:123456789&#10;telegram_bot:987654321" spellcheck="false"></textarea><p id="allowlist-hint" class="hint">格式：平台实例ID:用户ID，用 /sid 的 Bot ID 和 UID 拼接。未开启所有用户时，统一模式名单为空仅管理员可用。</p></div>
               <label class="toggle-row" for="allow_group_images"><span><strong>允许群聊绘图</strong><small>生成的图片将直接发送到发起请求的群聊。</small></span><input id="allow_group_images" name="allow_group_images" type="checkbox" role="switch"></label>
               <div class="divider"></div>
               <div class="section-label"><span>02</span><h4>生成与连接</h4></div>

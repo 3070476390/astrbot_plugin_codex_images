@@ -145,6 +145,66 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(self.plugin.service.generate.call_args.args[0], self.plugin._check(Event()))
         self.assertFalse(self.plugin.image_owners)
 
+    async def test_all_users_can_draw_with_shared_account_and_restore_allowlist(self):
+        self.plugin.config.update(account_mode="shared", allow_all_users=True, allowed_users=["qq:allowed"])
+        self.plugin.service.generate = AsyncMock(return_value=[])
+        visitor = Event("codex画图 cat", platform="another-bot", sender="visitor")
+        self.assertEqual(await self._consume(self.plugin.image_command(visitor)), [])
+        caller = self.plugin._check(visitor)
+        self.plugin.service.generate.assert_awaited_once_with(self.plugin._account_key(caller), "cat")
+        self.assertNotEqual(caller, self.plugin._account_key(caller))
+        self.plugin.service.generate.reset_mock()
+        self.plugin.config["allow_all_users"] = False
+        denied = await self._consume(self.plugin.image_command(visitor))
+        self.assertIn("使用名单", denied[0])
+        self.plugin.service.generate.assert_not_awaited()
+        self.assertEqual(self.plugin.config["allowed_users"], ["qq:allowed"])
+        await self._consume(self.plugin.image_command(Event("codex画图 cat", sender="allowed")))
+        self.plugin.service.generate.assert_awaited_once()
+
+    async def test_all_users_personal_accounts_remain_separate(self):
+        self.plugin.config.update(account_mode="personal", allow_all_users=True, allowed_users=["qq:allowed"])
+        self.plugin.service.generate = AsyncMock(return_value=[])
+        for sender in ("visitor-1", "visitor-2"):
+            event = Event("codex画图 cat", sender=sender)
+            self.assertEqual(await self._consume(self.plugin.image_command(event)), [])
+            self.assertEqual(self.plugin.service.generate.call_args.args[0], self.plugin._check(event))
+        calls = self.plugin.service.generate.await_args_list
+        self.assertNotEqual(calls[0].args[0], calls[1].args[0])
+
+    async def test_all_users_still_requires_identity_and_separate_group_access(self):
+        self.plugin.config.update(account_mode="shared", allow_all_users=True)
+        for event, message in [(Event(sender=None), "无法识别"), (Event(platform=None), "无法识别"), (Event(private=False), "私聊")]:
+            with self.subTest(message=message), self.assertRaisesRegex(Exception, message):
+                self.plugin._check(event)
+        self.plugin.config["allow_group_images"] = True
+        self.assertTrue(self.plugin._check(Event(private=False)))
+        with self.assertRaisesRegex(Exception, "账号操作请私聊"):
+            self.plugin._check(Event(private=False), private=True)
+        for invalid in (None, "true", "false", 1):
+            self.plugin.config["allow_all_users"] = invalid
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(Exception, "使用名单"):
+                self.plugin._check(Event())
+
+    async def test_all_users_cannot_manage_shared_login_or_cancel_others(self):
+        self.plugin.config.update(account_mode="shared", allow_all_users=True)
+        self.plugin.service.login = AsyncMock()
+        self.plugin.service.logout = AsyncMock()
+        for handler in (self.plugin.login_command, self.plugin.logout_command):
+            result = await self._consume(handler(Event()))
+            self.assertIn("扩展功能", result[0])
+        self.plugin.service.login.assert_not_called()
+        self.plugin.service.logout.assert_not_awaited()
+        owner = self.plugin._check(Event(sender="2"))
+        key = self.plugin._account_key(owner)
+        self.plugin.image_owners[key] = owner
+        self.plugin.service.cancel = AsyncMock(return_value=True)
+        result = await self._consume(self.plugin.cancel_command(Event(sender="1")))
+        self.assertIn("没有", result[0])
+        self.plugin.service.cancel.assert_not_awaited()
+        await self._consume(self.plugin.cancel_command(Event(sender="2")))
+        self.plugin.service.cancel.assert_awaited_once_with(key)
+
     async def _consume(self, generator):
         return [r async for r in generator]
 

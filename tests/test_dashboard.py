@@ -32,10 +32,28 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
         original = dict(self.plugin.config)
         for payload in [[], {"token": "secret"}, {"allow_group_images": "false"}, {"account_mode": "anything"},
                         {"allowed_users": ["bad"]}, {"allowed_users": ["qq:"]}, {"allowed_users": ["qq:1 2"]},
-                        {"request_timeout": 0}, {"model": []}]:
+                        {"request_timeout": 0}, {"model": []}, {"allow_all_users": "true"}, {"allow_all_users": 1}, {"allow_all_users": None}]:
             with self.subTest(payload=payload), self.assertRaises(Exception):
                 await self.controller.save_settings(payload)
             self.assertEqual(dict(self.plugin.config), original)
+
+    async def test_all_users_default_save_rollback_and_allowlist_restoration(self):
+        from test_plugin import Event
+        self.assertFalse(self.controller.state()["settings"]["allow_all_users"])
+        self.plugin.config["allowed_users"] = ["qq:allowed"]
+        with patch.object(self.plugin.config, "save_config", side_effect=OSError("disk full")):
+            with self.assertRaisesRegex(Exception, "保存失败"):
+                await self.controller.save_settings({"allow_all_users": True})
+        self.assertFalse(self.controller.state()["settings"]["allow_all_users"])
+        await self.controller.save_settings({"allow_all_users": True})
+        self.assertTrue(self.plugin.config.saved["allow_all_users"])
+        self.assertTrue(self.plugin._check(Event(sender="visitor")))
+        await self.controller.save_settings({"allow_all_users": False})
+        self.assertFalse(self.plugin.config.saved["allow_all_users"])
+        self.assertEqual(self.plugin.config.saved["allowed_users"], ["qq:allowed"])
+        with self.assertRaisesRegex(Exception, "使用名单"):
+            self.plugin._check(Event(sender="visitor"))
+        self.assertTrue(self.plugin._check(Event(sender="allowed")))
 
     async def test_save_failure_rolls_back_memory(self):
         original = dict(self.plugin.config)
@@ -138,6 +156,7 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone((await self.controller.save_settings({"account_mode": "personal"}))["quota"])
 
     async def test_dashboard_routes_require_actual_dashboard_admin(self):
+        self.plugin.config["allow_all_users"] = True
         web = types.ModuleType("astrbot.api.web")
         request = types.SimpleNamespace(username=None, json=AsyncMock(return_value={"model": "test"}))
         web.request = request

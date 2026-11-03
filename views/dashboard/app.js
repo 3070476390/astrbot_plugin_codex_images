@@ -27,9 +27,13 @@ function fillForm(settings) {
 }
 
 function formHints() {
-  $("allowlist-hint").textContent = $("account_mode").value === "shared"
-    ? "格式：平台实例ID:用户ID，可通过机器人 /sid 查询。统一模式下，聊天管理员始终可用；名单为空时仅管理员可用。"
-    : "格式：平台实例ID:用户ID，每行一项。独立模式下，名单为空表示所有用户均可使用自己的账号。";
+  const allowAll = $("allow_all_users").checked;
+  $("allowed_users").disabled = allowAll;
+  $("allowlist-hint").textContent = allowAll
+    ? "所有用户均可使用，无需填写名单。已有名单会保留，关闭此开关后恢复生效；群聊还需开启下方开关。"
+    : $("account_mode").value === "shared"
+      ? "格式：平台实例ID:用户ID，用 /sid 的 Bot ID 和 UID 拼接。统一模式下，聊天管理员始终可用；名单为空时仅管理员可用。"
+      : "格式：平台实例ID:用户ID，每行一项。独立模式下，名单为空表示所有用户均可使用自己的账号。";
 }
 
 function controls() {
@@ -61,7 +65,9 @@ function render(state, resetForm = false) {
   $("personal-note").hidden = shared;
   $("mode-summary").textContent = shared ? "统一绘图账号" : "每人独立账号";
   const count = state.settings.allowed_users.length;
-  $("users-summary").textContent = shared ? count ? `${count} 位用户 + 管理员` : "仅聊天管理员" : count ? `${count} 位指定用户` : "所有独立账号用户";
+  $("users-summary").textContent = state.settings.allow_all_users === true
+    ? shared ? "所有用户" : "所有独立账号用户"
+    : shared ? count ? `${count} 位用户 + 管理员` : "仅聊天管理员" : count ? `${count} 位指定用户` : "所有独立账号用户";
   $("tasks-summary").textContent = `${state.active_tasks} / ${state.settings.max_sessions}`;
   $("group-summary").textContent = state.settings.allow_group_images ? "已开启" : "未开启";
   renderQuota(state);

@@ -9,7 +9,7 @@ files = [root / name for name in (
 )]
 files += sorted((root / "codex_images").glob("*.py"))
 files += sorted(file for file in (root / "views").rglob("*") if file.suffix in {".html", ".js", ".css"})
-destination = root / "dist" / "astrbot_plugin_codex_images-v0.4.0.zip"
+destination = root / "dist" / "astrbot_plugin_codex_images-v0.5.0.zip"
 destination.parent.mkdir(exist_ok=True)
 with ZipFile(destination, "w", ZIP_DEFLATED) as archive:
     for file in files:
