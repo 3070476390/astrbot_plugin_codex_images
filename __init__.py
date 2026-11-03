@@ -1,0 +1,1 @@
+"""AstrBot Codex Images plugin."""

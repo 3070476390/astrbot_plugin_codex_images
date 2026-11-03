@@ -1,1 +1,142 @@
-# astrbot_plugin_codex_images
+# AstrBot Codex 订阅绘图
+
+在 AstrBot 的“扩展功能 → Codex 绘图”中登录和管理统一 ChatGPT/Codex 订阅账号，让指定聊天用户直接调用图像生成，由机器人回传图片。也可切换回每人独立账号模式。
+
+**版本：0.3.0，新增图生图和动态模型查询。** 扩展页面包含设备码登录、登录进度、状态刷新、退出、取消、使用名单、群聊开关及绘图参数。后台逻辑与浏览器模拟交互已验证；真实账号及消息平台仍待联调。无需填写 OpenAI API Key，也不会自动切换到按量付费 API。
+
+## 运行条件
+
+- AstrBot 4.29.4 或以上的 4.x 版本，Python 3.11+。已按 4.29.4 的 Plugin View、侧栏和 Web API 源码适配。
+- 在 **AstrBot 所在的机器或容器内** 安装官方 Codex CLI，且该版本必须支持 `chatgptDeviceCode` 登录和内置图像生成。宿主机安装 CLI 不等于 Docker 容器内可用。
+- 用户账号具备 Codex 及图像生成权限、有可用额度，并能完成设备码登录。必要时在 ChatGPT 安全设置或工作区权限中开启设备码登录。
+- 运行环境可访问 OpenAI 登录和 Codex 服务。子进程保留标准代理和证书环境变量。
+
+本地验证所用 CLI 为 `0.166.0-alpha.5.1`：已验证真实协议初始化、空白账号状态及进程退出，已核对其生成的 JSON Schema。**没有把这次协议验证视为真实出图验证，也不保证其他 CLI 版本兼容。** app-server 接口和图片返回格式可能变化。
+
+## 安装
+
+本项目使用私有 GitHub 仓库，需要先登录拥有访问权限的 GitHub 账号。
+
+- [下载 0.3.0 插件安装包](https://github.com/3070476390/astrbot_plugin_codex_images/blob/main/downloads/astrbot_plugin_codex_images-v0.3.0.zip)：打开后点击下载原始文件按钮。
+- [浏览源码](https://github.com/3070476390/astrbot_plugin_codex_images)。也可在本地执行 `python scripts/build_zip.py`，安装包输出到 `dist/`。
+
+1. 将下载的 `astrbot_plugin_codex_images-v0.3.0.zip` 上传到 AstrBot 插件管理的本地安装入口；也可将插件源码放入 `data/plugins/astrbot_plugin_codex_images/`。`main.py`、`metadata.yaml` 和 `views/` 应位于该目录顶层。私有仓库的普通 URL 需要 GitHub 认证，建议使用下载 ZIP 后本地安装的方式。
+2. 确保 AstrBot 进程能启动 Codex CLI；插件没有额外 Python 包依赖。
+3. 在插件配置中填写 `codex_command`，通常 Linux 为 `codex` 或其绝对路径。Windows 必须填写 **原生 `codex.exe` 的完整路径**；不执行 npm 的 `.cmd`、`.bat` 或 PowerShell 包装脚本。
+4. 重载插件并刷新 AstrBot 后台，左侧“扩展功能”中会出现 **Codex 绘图**。也可通过插件详情页打开 `dashboard` 视图。
+5. 在页面填写 Codex 路径、使用名单等设置并保存，点击“登录 Codex 订阅账号”。将官方地址复制到新标签页，输入页面给出的设备码，等待登录完成。
+6. 允许的聊天用户发送 `/codex画图 图片描述` 即可绘图。
+
+升级 0.1.0：新版本默认使用统一账号模式，需要在扩展页面单独登录，**不会自动把任何原有用户凭据复制为统一账号**。切换到“每人独立账号”可继续使用原有个人登录记录。空使用名单在统一模式中仅允许 AstrBot 聊天管理员，不会自动向所有人开放订阅额度。
+
+如果使用官方 npm 包，在 Linux 上可通过 `npm install -g @openai/codex` 安装 CLI。以官方 [CLI 文档](https://learn.chatgpt.com/docs/cli) 为准。Windows 可使用已有桌面应用附带的 CLI 或官方原生二进制；升级后绝对路径可能变化，需要同步更新配置。
+
+## 使用
+
+```text
+/codex登录
+/codex状态
+/codex画图 一只撑着透明雨伞的橘猫，水彩插画，柔和的蓝绿色背景
+/codex改图 保留人物，把背景改成雪山
+/codex模型
+/codex模型 2
+/codex取消
+/codex退出
+```
+
+统一模式：管理员在扩展页面完成登录/退出。聊天端通过 `/codex画图`、`/codex改图`、`/codex模型`、`/codex状态` 和 `/codex取消` 使用；用户只能取消自己发起的任务。统一账号同时运行一个任务，繁忙时提示稍后重试。
+
+独立模式：用户私聊发送 `/codex登录` 后获取官方 `auth.openai.com` 页面和设备码，并在自己的浏览器登录。每个平台实例、每个用户仍有独立账号目录。两种模式的凭据均由 Codex 保存在 **机器人服务器** 上，不需要向机器人发送密码、令牌或 `auth.json`。
+
+默认仅允许私聊。开启 `allow_group_images` 后，允许的群成员可按当前账号模式绘图，图片会回传到发起请求的群。聊天端账号操作仍仅限私聊。
+
+每次输出一张图片，支持文生图和单张参考图编辑。没有实现多图融合、批量生成、蒙版局部编辑或跨平台账号绑定。
+
+### 图生图
+
+将 **一张图片和 `/codex改图 修改要求` 放在同一条消息中发送**，例如附上照片并发送 `/codex改图 改成水彩插画，保留主体构图`。也可以引用一条带图片的消息后发送该指令，前提是消息平台会在引用消息链中提供图片；没有读到引用图片时，请改为同条消息附图。
+
+`/codex图生图` 是 `/codex改图` 的别名。`/codex画图` 在消息附图或引用图片时也会自动进入图生图；不附图时继续文生图。同条消息中的图片优先于引用图片，不读取跨消息缓存或其他用户的最近图片。
+
+一次支持一张参考图，格式为 PNG、JPEG 或 WebP，大小不能超过配置中的 `max_image_mb`。GIF 等格式请先转换。参考图通过 AstrBot 的媒体解析器读取，复制到当前账号任务的临时目录，以 Codex `localImage` 输入传递；任务结束、失败或取消后清理插件创建的参考图副本，AstrBot 自身的媒体缓存由其管理。读取参考图计入本次绘图超时，支持中途取消。
+
+### 可见模型
+
+发送 `/codex模型` 或 `/codex模型列表` 查询 **当前绘图账号** 通过 Codex `model/list` 返回的可见调度模型。统一模式查询统一账号，独立模式查询自己的账号；需要先登录并拥有插件使用权限。
+
+列表按每页 10 个模型展示，使用 `/codex模型 2` 查看下一页，并标注默认模型、当前配置和图片输入能力。模型名称来自实际返回值，不写死在插件中。可将返回的模型 ID 填入扩展页面的“调度模型”设置。
+
+该列表不是独立的 GPT Image 模型目录，也不会自动切换模型。支持图片输入表示可接收参考图，**不代表账号或该模型已具备内置生图权限**；能否生成或编辑图片仍以实际调用为准。
+
+## 配置
+
+| 配置项 | 默认值 | 说明 |
+| --- | --- | --- |
+| `account_mode` | `shared` | `shared` 为统一账号，`personal` 为每人独立账号 |
+| `codex_command` | `codex` | 可执行文件名称或完整路径，不接受命令行参数 |
+| `model` | 空 | 使用 Codex 默认调度模型；可填写账号可用的 Codex 模型，不能填图像模型名 |
+| `allow_group_images` | `false` | 是否允许群聊绘图 |
+| `allowed_users` | `[]` | 填写 `平台实例ID:用户ID`，可通过 `/sid` 查询。统一模式始终允许聊天管理员，空名单仅管理员；独立模式空名单允许所有用户使用自己的账号 |
+| `max_sessions` | `4` | 1–32；登录等待、状态查询和绘图均计入。每个账号同时一个任务，因此统一账号同时只绘制一张图 |
+| `request_timeout` | `30` | 单次协议请求超时，5–120 秒 |
+| `login_timeout` | `900` | 等待用户完成登录，30–1800 秒；设备码可能更早失效 |
+| `generation_timeout` | `300` | 单次绘图等待上限，30–1800 秒 |
+| `max_image_mb` | `20` | 输入参考图和输出图片的大小上限，1–30 MB |
+| `max_prompt_chars` | `4000` | 描述长度上限，1–16000 字符 |
+
+扩展页面会校验字段；保存后对新任务生效，无需重载。有任务运行时禁止保存。通过 AstrBot 原生插件配置面板修改时，按该面板提示重载插件。错误配置可能导致插件加载失败。
+
+## 数据和运行方式
+
+数据位于 AstrBot 的 `data/plugin_data/astrbot_plugin_codex_images/`：
+
+```text
+users/<账号标识的 SHA-256>/
+  codex/                 # 独立 CODEX_HOME；Codex 管理凭据和刷新
+  jobs/<随机任务标识>/     # 绘图工作目录和临时回传图片
+```
+
+- 凭据采用 Codex 文件存储，不复制或读取服务器默认 `~/.codex` 的登录信息，不继承 OpenAI API Key。
+- 统一账号使用专用账号标识，与独立用户目录分开。统一账号管理仅允许 AstrBot 配置中的后台管理员；普通 API Key 和其他用户名不能访问。所有请求通过 AstrBot 的受限 iframe bridge，页面不获取后台令牌。
+- 统一模式的设备码仅显示于管理页面，独立模式通过私聊发送。页面刷新后可继续等待正在进行的登录；成功、失败、超时或取消后移除设备码。状态不展示邮箱、令牌或账号详细信息。日志不写入上游响应和 stderr。
+- 每个任务启动独立 app-server，任务结束、超时、取消或插件停止时回收。取消可能无法撤回已发生的服务端用量。
+- 模型会话使用只读沙箱，禁用 shell、浏览器、电脑控制、插件、MCP 应用及子代理；客户端拒绝服务端权限申请和自定义工具请求。
+- 账号目录隔离是应用层隔离，**不是独立的系统用户或容器安全边界**。建议在专用容器/系统账号下部署，并用使用名单限制为可信用户；不要把服务器上的敏感工作目录挂载给它。
+- 只从 `imageGeneration` 完成事件提取图片，支持 Base64 和本用户工作目录或 `codex/generated_images` 下的 `savedPath`。不从模型自然语言中提取文件路径，不下载任意图片 URL。
+- 回传副本在发送结束后删除；Codex 自己生成的原图、缓存和诊断文件可能保留，需由管理员按实际磁盘占用维护。退出登录不承诺清空所有历史缓存，卸载插件也不主动递归删除数据目录。
+- 多进程 AstrBot 实例不应共享同一个插件数据目录；本版并发控制在单进程内生效。
+
+## 验证和排障
+
+```bash
+python -m unittest discover -s tests -v
+python scripts/smoke_codex.py --codex /path/to/codex
+python scripts/build_zip.py
+```
+
+单元测试使用本地模拟 app-server，通过真实子进程和 JSONL 管道验证登录、通知先于响应、重复事件、用户隔离、取消、超时、异常退出、图片路径检查、图生图参考图传递与清理，以及模型分页查询。`smoke_codex.py` 使用临时空白账号目录验证真实 CLI 协议，不登录、不调用模型、不生成图片。
+
+界面测试：安装 Playwright 并确保 Edge 可用后执行 `node tests/view_smoke.cjs`，使用本地模拟 bridge 验证登录轮询、设备码清理、名单与配置保存、保存失败、草稿保留、退出、主题和手机布局。测试预览输出到 `dist/dashboard-preview.png` 等文件；截图中的登录状态是模拟数据。
+
+真实部署验收：扩展页面登录 → 显示已连接 → 设置名单并保存 → 查询模型 → 文生图 → 附图/引用图改图 → 名单外用户被拒绝 → 用户不能取消别人的任务 → 页面退出后无法继续绘图。独立模式另验不同用户账号隔离。
+
+常见问题：
+
+- **找不到 Codex / 无法启动**：检查路径、容器内安装情况、可执行权限。Windows 的异步子进程需要可用的 Proactor 事件循环；某些执行沙箱会阻止创建子进程管道。
+- **扩展菜单没有入口**：确认安装包包含 `views/dashboard/index.html`，AstrBot 版本至少为 4.29.4，插件已启用；重载插件并刷新整个后台。
+- **设备码页面无法直接打开新窗口**：AstrBot 视图 iframe 限制弹窗，请复制官方地址到浏览器新标签页。复制按钮不受支持时，可选中文本后按 Ctrl+C / ⌘C。
+- **登录接口失败**：检查 CLI 是否支持设备码流程、账号是否允许设备码登录，以及网络代理。不会改用群聊收集凭据。
+- **登录成功但无图片**：不代表图像权限可用。确认账号与 CLI 支持内置生图，并检查订阅额度和模型设置。
+- **仅返回图片引用**：本版不猜测私有文件下载接口；只支持带 Base64 或受限本地路径的结果。需要使用兼容 CLI 或适配其公开的新协议。
+- **只收到内部错误**：日志只含异常类型；可先用隔离环境运行上述协议检查。向他人提供排障材料前，请移除设备码和凭据。
+
+## 接口依据
+
+- [Codex app-server：协议与设备码登录](https://learn.chatgpt.com/docs/app-server)
+- [Codex 认证](https://learn.chatgpt.com/docs/auth)
+- [Codex 内置图像生成](https://learn.chatgpt.com/docs/image-generation)：内置生图计入 Codex 用量，具体账号可用性和额度以官方服务为准。
+- [Sign in with ChatGPT 预览限制](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations)：该令牌调用 Responses API 的路线当前不支持托管图像生成，因此本插件使用 Codex 管理登录和内置工具，未将订阅令牌当作 Images API Key。
+- [AstrBot 插件开发](https://docs.astrbot.app/dev/star/plugin-new.html)
+- [AstrBot 插件可视化视图](https://docs.astrbot.app/dev/star/guides/plugin-pages.html)
+
+项目仓库为 [3070476390/astrbot_plugin_codex_images](https://github.com/3070476390/astrbot_plugin_codex_images)，未提交到 AstrBot 公共插件市场。

@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Codex 绘图</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-icon" aria-hidden="true">✦</span><div><h1>Codex 绘图</h1><p>账号与绘图设置</p></div><span class="version">v0.3.0</span></div>
+    <div class="connection"><span id="connection-dot" class="dot"></span><span id="connection-text">正在连接插件…</span></div>
+  </header>
+  <main>
+    <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+    <div class="intro"><div><span class="eyebrow">CODEX IMAGE STUDIO</span><h2>让创意，从一句话开始。</h2><p>在这里连接绘图账号，设置谁可以使用，以及如何生成图片。</p></div><span class="intro-mark" aria-hidden="true">✧</span></div>
+    <div class="workspace">
+      <aside>
+        <section class="card account-card" aria-labelledby="account-title">
+          <div class="card-heading"><h3 id="account-title">账号认证</h3><span class="tag">订阅登录</span></div>
+          <div class="account-state"><span class="account-icon" aria-hidden="true">◎</span><div><strong id="account-status">等待连接</strong><span>机器人统一绘图账号</span></div><button id="refresh" class="icon-button" type="button" aria-label="刷新账号状态" title="刷新账号状态" disabled>↻</button></div>
+          <p id="account-message" class="muted">正在读取账号状态…</p>
+          <div id="device-panel" class="device-panel" hidden>
+            <label for="device-url">1. 在浏览器新标签页打开官方地址</label>
+            <div class="copy-row"><input id="device-url" readonly aria-label="官方登录地址"><button id="copy-url" type="button" class="small">复制</button></div>
+            <label for="device-code">2. 输入本次设备码</label>
+            <div class="copy-row"><input id="device-code" class="device-code" readonly aria-label="设备码"><button id="copy-code" type="button" class="small">复制</button></div>
+            <p class="muted">完成授权后，本页会自动更新。设备码过期后请重新获取。</p>
+          </div>
+          <button id="login" class="primary full" type="button" disabled>登录 Codex 订阅账号 <span aria-hidden="true">↗</span></button>
+          <div class="account-actions"><button id="cancel" type="button" disabled>取消当前任务</button><button id="logout" class="danger-text" type="button" disabled>退出账号</button></div>
+          <p class="privacy-note">在 OpenAI 官方页面完成授权。登录凭据保存在机器人服务器，不需要在聊天中发送密码。</p>
+          <p id="personal-note" class="mode-note" hidden>当前为独立账号模式。每位用户通过私聊 <code>/codex登录</code> 管理自己的账号；此卡片仍显示保留的统一账号。</p>
+        </section>
+        <section class="card" aria-labelledby="overview-title">
+          <div class="card-heading"><h3 id="overview-title">运行概览</h3><span class="live-label">实时</span></div>
+          <dl class="overview"><div><dt>当前模式</dt><dd id="mode-summary">—</dd></div><div><dt>允许使用</dt><dd id="users-summary">—</dd></div><div><dt>正在运行</dt><dd id="tasks-summary">—</dd></div><div><dt>群聊绘图</dt><dd id="group-summary">—</dd></div></dl>
+          <p class="muted footnote">订阅用量与图像权限以 Codex 实际返回为准。</p>
+        </section>
+      </aside>
+      <div class="content">
+        <section class="card settings-card" aria-labelledby="settings-title">
+          <div class="settings-header"><div><h3 id="settings-title">绘图设置</h3><p class="muted">保存后对新任务生效，无需重启插件。</p></div><span id="save-state" class="save-state">正在读取</span></div>
+          <form id="settings-form">
+            <fieldset id="settings-fields" disabled>
+              <div class="section-label"><span>01</span><h4>账号与访问</h4></div>
+              <div class="field"><label for="account_mode">账号模式</label><select id="account_mode" name="account_mode"><option value="shared">统一绘图账号 · 管理员登录</option><option value="personal">每人独立账号 · 用户私聊登录</option></select><p class="hint">统一模式下，允许的聊天用户共享此账号的订阅额度。独立模式会继续使用各自原有的账号。</p></div>
+              <div class="field"><div class="label-line"><label for="allowed_users">允许使用的用户</label><span>每行一项</span></div><textarea id="allowed_users" name="allowed_users" rows="4" placeholder="qq_bot:123456789&#10;telegram_bot:987654321" spellcheck="false"></textarea><p id="allowlist-hint" class="hint">格式：平台实例ID:用户ID，可通过机器人 /sid 查询。统一模式下，聊天管理员始终可用；名单为空时仅管理员可用。</p></div>
+              <label class="toggle-row" for="allow_group_images"><span><strong>允许群聊绘图</strong><small>生成的图片将直接发送到发起请求的群聊。</small></span><input id="allow_group_images" name="allow_group_images" type="checkbox" role="switch"></label>
+              <div class="divider"></div>
+              <div class="section-label"><span>02</span><h4>生成与连接</h4></div>
+              <div class="field"><label for="codex_command">Codex 可执行文件</label><input id="codex_command" name="codex_command" placeholder="codex" required maxlength="2048" spellcheck="false"><p class="hint">填写 AstrBot 所在机器或容器内的路径。Windows 请填写原生 codex.exe 的完整路径。</p></div>
+              <div class="field"><label for="model">调度模型 <span class="optional">可选</span></label><input id="model" name="model" placeholder="留空，使用 Codex 默认模型" maxlength="2048" spellcheck="false"><p class="hint">发送 /codex模型 查看账号可见的 Codex 模型。图生图需要模型支持图片输入；实际生图权限以调用结果为准。</p></div>
+              <div class="two-columns"><div class="field"><label for="generation_timeout">绘图超时 <span class="unit">秒</span></label><input id="generation_timeout" name="generation_timeout" type="number" min="30" max="1800" step="1" required></div><div class="field"><label for="max_prompt_chars">描述长度上限 <span class="unit">字符</span></label><input id="max_prompt_chars" name="max_prompt_chars" type="number" min="1" max="16000" step="1" required></div></div>
+              <details id="advanced"><summary>高级设置 <span>并发、登录超时与图片大小</span></summary><div class="two-columns advanced-grid">
+                <div class="field"><label for="max_sessions">最大任务数</label><input id="max_sessions" name="max_sessions" type="number" min="1" max="32" step="1" required><p class="hint">统一账号同时只处理一个任务。</p></div>
+                <div class="field"><label for="request_timeout">请求超时 <span class="unit">秒</span></label><input id="request_timeout" name="request_timeout" type="number" min="5" max="120" step="1" required></div>
+                <div class="field"><label for="login_timeout">登录等待 <span class="unit">秒</span></label><input id="login_timeout" name="login_timeout" type="number" min="30" max="1800" step="1" required></div>
+                <div class="field"><label for="max_image_mb">图片大小上限 <span class="unit">MB</span></label><input id="max_image_mb" name="max_image_mb" type="number" min="1" max="30" step="1" required></div>
+              </div></details>
+            </fieldset>
+            <div class="form-footer"><p>有任务运行时，请先等待完成再保存。</p><div><button id="reset" type="button" disabled>还原修改</button><button id="save" type="submit" class="primary" disabled>保存设置</button></div></div>
+          </form>
+        </section>
+        <section class="quick-start"><div class="quick-icon" aria-hidden="true">✎</div><div><h3>连接完成，去聊天里试一试</h3><p>文生图：/codex画图 图片描述<br>图生图：附带或引用一张图片，发送 /codex改图 修改要求<br>模型列表：/codex模型，可带页码。</p><code>/codex改图 保留主体，把背景改成雪山</code></div><span class="tag subtle">文生图 · 图生图</span></section>
+      </div>
+    </div>
+    <footer class="page-footer">Codex 绘图 · AstrBot 扩展功能 <span>账号由管理员管理，创意由你开始。</span></footer>
+  </main>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

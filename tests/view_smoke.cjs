@@ -1,0 +1,88 @@
+// Browser integration using a mock AstrBot bridge; never authenticates or calls Codex.
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const { chromium } = require('playwright');
+const root = path.resolve(__dirname, '..');
+const schema = JSON.parse(fs.readFileSync(path.join(root, '_conf_schema.json'), 'utf8'));
+const settings = Object.fromEntries(Object.entries(schema).map(([key, value]) => [key, value.default]));
+
+(async () => {
+  const browser = await chromium.launch({ channel: 'msedge', headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1200 }, deviceScaleFactor: 1 });
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.route('http://127.0.0.1:9911/**', async route => {
+      const name = new URL(route.request().url()).pathname.split('/').pop() || 'index.html';
+      if (!['index.html', 'app.js', 'style.css'].includes(name)) return route.abort();
+      await route.fulfill({ path: path.join(root, 'views/dashboard', name), contentType: name.endsWith('.js') ? 'text/javascript' : name.endsWith('.css') ? 'text/css' : 'text/html' });
+    });
+    await page.addInitScript(settings => {
+      let state = {version: '0.3.0', settings, account: {status: 'signed_out', message: '尚未登录统一账号。'}, login_pending: false, busy: false, active_tasks: 0};
+      window.rejectSave = false;
+      window.finishLogin = () => {state.account = {status: 'logged_in', message: '统一账号登录成功，可以向机器人发送绘图指令。'};state.login_pending = false;};
+      window.AstrBotPluginView = {
+        ready: async () => ({}),
+        apiGet: async () => structuredClone(state),
+        apiPost: async (endpoint, body) => {
+          if (endpoint.endsWith('/settings')) {
+            if (window.rejectSave) throw new Error('模拟保存失败，请重试');
+            state.settings = body;
+          }
+          if (endpoint.endsWith('/login')) {
+            state.account = {status: 'waiting', message: '请在浏览器新标签页打开官方地址，输入设备码完成登录。', code: 'TEST-1234', url: 'https://auth.openai.com/codex/device'};
+            state.login_pending = true;
+          }
+          if (endpoint.endsWith('/cancel') || endpoint.endsWith('/logout')) {
+            state.account = {status: 'signed_out', message: '统一账号已退出。'};
+            state.login_pending = false;
+          }
+          return structuredClone(state);
+        }
+      };
+    }, settings);
+    await page.goto('http://127.0.0.1:9911/');
+    await page.getByText('已连接插件后端').waitFor();
+    assert.equal(await page.locator('#users-summary').innerText(), '仅聊天管理员');
+    await page.locator('#allowed_users').fill('qq_bot:123456789');
+    await page.locator('#allow_group_images').check();
+    await page.locator('#save').click();
+    await page.getByText('设置已保存，将用于下一次任务。').waitFor();
+    assert.equal(await page.locator('#users-summary').innerText(), '1 位用户 + 管理员');
+    await page.locator('#login').click();
+    assert.equal(await page.locator('#device-code').inputValue(), 'TEST-1234');
+    assert.equal(await page.locator('#device-panel').isVisible(), true);
+    fs.mkdirSync(path.join(root, 'dist'), { recursive: true });
+    await page.screenshot({ path: path.join(root, 'dist/dashboard-login-preview.png'), fullPage: true });
+    // Polling must not overwrite unsaved drafts while login status changes.
+    await page.locator('#model').fill('draft-model');
+    await page.evaluate(() => window.finishLogin());
+    await page.getByText('已连接 Codex', { exact: true }).waitFor();
+    assert.equal(await page.locator('#model').inputValue(), 'draft-model');
+    assert.equal(await page.locator('#device-panel').isVisible(), false);
+    assert.equal(await page.locator('#device-code').inputValue(), '');
+    await page.evaluate(() => {window.rejectSave = true;});
+    await page.locator('#save').click();
+    await page.getByText('模拟保存失败，请重试').waitFor();
+    assert.equal(await page.locator('#model').inputValue(), 'draft-model');
+    await page.locator('#reset').click();
+    assert.equal(await page.locator('#model').inputValue(), '');
+    fs.mkdirSync(path.join(root, 'dist'), { recursive: true });
+    await page.screenshot({ path: path.join(root, 'dist/dashboard-preview.png'), fullPage: true });
+    await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
+    await page.waitForTimeout(200);
+    await page.screenshot({ path: path.join(root, 'dist/dashboard-dark.png'), fullPage: true });
+    await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
+    await page.waitForTimeout(200);
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'mobile overflow');
+    await page.screenshot({ path: path.join(root, 'dist/dashboard-mobile.png'), fullPage: true });
+    await page.locator('#logout').click();
+    await page.getByText('统一账号已退出。').first().waitFor();
+    assert.deepEqual(errors, []);
+    console.log('PASS: bridge initialization, login polling, hidden expired codes, allowlist/settings save, dirty draft preservation, save failure, reset, logout, mobile layout and theme rendering');
+  } finally {
+    await browser.close();
+  }
+})().catch(error => {console.error(error);process.exitCode = 1;});

@@ -1,0 +1,13 @@
+{
+  "account_mode": {"description": "绘图账号模式", "type": "string", "default": "shared", "options": ["shared", "personal"], "labels": ["统一绘图账号", "每人独立账号"], "hint": "统一模式由后台管理员登录，聊天管理员和使用名单中的用户可调用。"},
+  "codex_command": {"description": "Codex 可执行文件", "type": "string", "default": "codex", "hint": "必须安装在 AstrBot 所在环境。Windows 请填写原生 codex.exe 完整路径。"},
+  "model": {"description": "Codex 调度模型", "type": "string", "default": "", "hint": "留空使用 Codex 默认模型。通过 /codex模型 查询可见模型，图生图需支持图片输入。"},
+  "allow_group_images": {"description": "允许群聊绘图", "type": "bool", "default": false, "hint": "开启后图片会发到请求所在群聊；账号操作仍仅限私聊。"},
+  "allowed_users": {"description": "允许使用的用户", "type": "list", "default": [], "hint": "格式为 平台实例ID:用户ID，可通过 /sid 查询。统一模式留空仅允许聊天管理员；独立模式留空允许所有用户使用自己的账号。"},
+  "max_sessions": {"description": "最大同时运行任务数", "type": "int", "default": 4, "hint": "1–32，包含登录等待和绘图任务。每个用户同时只能运行一个任务。"},
+  "request_timeout": {"description": "协议请求超时（秒）", "type": "int", "default": 30},
+  "login_timeout": {"description": "登录等待超时（秒）", "type": "int", "default": 900},
+  "generation_timeout": {"description": "绘图超时（秒）", "type": "int", "default": 300},
+  "max_image_mb": {"description": "最大图片大小（MB）", "type": "int", "default": 20, "hint": "1–30，适用于输入参考图和输出图片"},
+  "max_prompt_chars": {"description": "图片描述最大字符数", "type": "int", "default": 4000}
+}

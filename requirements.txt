@@ -1,0 +1,1 @@
+# No additional Python dependencies. Requires Python >= 3.11 and Codex CLI.
