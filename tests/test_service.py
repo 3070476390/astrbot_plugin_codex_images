@@ -184,6 +184,28 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(PluginError, "分页"):
             await self.service.list_models(self.key)
 
+    async def test_quota_reads_live_snapshot_without_credentials_or_inference(self):
+        data = await self.service.read_quota(self.key)
+        self.assertEqual(data["buckets"][0]["windows"][0]["remaining_percent"], 75)
+        self.assertEqual(data["buckets"][0]["windows"][1]["remaining_percent"], 20)
+        self.assertNotIn("secret", str(data))
+        self.assertFalse(self.service.sessions)
+        self.mode = "quota_empty"
+        self.assertEqual((await self.service.read_quota(self.key))["buckets"], [])
+
+    async def test_quota_login_protocol_errors_and_concurrency(self):
+        for mode, message in [("anonymous", "登录"), ("quota_unsupported", "不支持额度查询"), ("quota_error", "失败")]:
+            with self.subTest(mode=mode):
+                self.mode = mode
+                with self.assertRaisesRegex(PluginError, message) as raised:
+                    await self.service.read_quota(self.key)
+                self.assertNotIn("secret", str(raised.exception))
+                self.assertFalse(self.service.sessions)
+        self.mode = "success"
+        async with self.service.session(self.key):
+            with self.assertRaisesRegex(PluginError, "已有"):
+                await self.service.read_quota(self.key)
+
 
 class BoundaryTests(unittest.TestCase):
     def test_identity_is_platform_scoped_and_path_safe(self):

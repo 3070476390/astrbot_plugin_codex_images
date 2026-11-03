@@ -9,6 +9,7 @@ from .codex_images.errors import PluginError
 from .codex_images.service import ImageService, Settings, user_key
 from .codex_images.dashboard import DashboardController, SHARED_KEY
 from .codex_images.message_images import load_reference, reference_from_message
+from .codex_images.quota import format_quota
 
 
 class CodexImagesPlugin(Star):
@@ -72,6 +73,7 @@ class CodexImagesPlugin(Star):
             "/codex画图 图片描述：生成一张图片\n"
             "/codex改图 修改要求 + 一张图：图生图，也可引用带图消息\n"
             "/codex模型 [页码]：查询账号可见的模型及图片输入能力\n"
+            "/codex额度：查询账号剩余额度百分比和重置时间\n"
             "/codex取消：停止当前登录或绘图任务\n"
             "是否能生成图片取决于账号权限和可用额度。"
         )
@@ -116,6 +118,21 @@ class CodexImagesPlugin(Star):
         except Exception as exc:
             logger.error("Codex 状态异常 (%s)", type(exc).__name__)
             yield event.plain_result("无法查询状态，请检查 Codex 配置。")
+
+    @filter.command("codex额度", alias={"codex用量"})
+    async def quota_command(self, event: AstrMessageEvent):
+        """查询当前绘图账号的额度快照。"""
+        try:
+            key = self._account_key(self._check(event))
+            if key in self.image_owners or (self.account_mode == "shared" and self.dashboard.login_pending):
+                raise PluginError("绘图账号正在执行任务，请等待完成后查询额度。")
+            data = await self.service.read_quota(key)
+            yield event.plain_result(format_quota(data, "统一账号" if self.account_mode == "shared" else "我的账号"))
+        except PluginError as exc:
+            yield event.plain_result(str(exc))
+        except Exception as exc:
+            logger.error("Codex 额度查询异常 (%s)", type(exc).__name__)
+            yield event.plain_result("无法查询额度，请检查 Codex 配置和网络。")
 
     @filter.command("codex退出")
     async def logout_command(self, event: AstrMessageEvent):

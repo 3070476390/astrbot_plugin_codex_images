@@ -39,6 +39,7 @@ function controls() {
   $("save").disabled = blocked || !dirty || busy || current?.active_tasks > 0;
   $("reset").disabled = blocked || !dirty;
   $("refresh").disabled = blocked || busy;
+  $("refresh-quota").disabled = blocked || busy || current?.settings.account_mode !== "shared" || current?.account.status !== "logged_in";
   $("login").disabled = blocked || busy || current?.settings.account_mode !== "shared" || current?.account.status === "logged_in";
   $("logout").disabled = blocked || current?.account.status === "signed_out";
   $("cancel").disabled = blocked || !busy;
@@ -63,7 +64,80 @@ function render(state, resetForm = false) {
   $("users-summary").textContent = shared ? count ? `${count} 位用户 + 管理员` : "仅聊天管理员" : count ? `${count} 位指定用户` : "所有独立账号用户";
   $("tasks-summary").textContent = `${state.active_tasks} / ${state.settings.max_sessions}`;
   $("group-summary").textContent = state.settings.allow_group_images ? "已开启" : "未开启";
+  renderQuota(state);
   controls();
+}
+
+function quotaText(parent, tag, text, className = "") {
+  const node = document.createElement(tag);
+  node.textContent = text;
+  node.className = className;
+  parent.append(node);
+  return node;
+}
+
+function quotaTime(timestamp) {
+  return timestamp == null ? "未提供" : new Date(timestamp * 1000).toLocaleString("zh-CN", {hour12: false});
+}
+
+function renderQuota(state) {
+  const content = $("quota-content");
+  content.replaceChildren();
+  const status = $("quota-status");
+  status.classList.remove("danger-text");
+  if (state.settings.account_mode !== "shared") {
+    status.textContent = "独立账号模式：请私聊发送 /codex额度 查询自己的账号。";
+    return;
+  }
+  const quota = state.quota;
+  if (!quota) {
+    status.textContent = state.account.status === "logged_in" ? "点击刷新额度，读取统一账号的最新用量。" : "确认统一账号已登录后，可刷新额度。";
+    return;
+  }
+  if (quota.status === "error") {
+    status.textContent = quota.message;
+    status.classList.add("danger-text");
+    return;
+  }
+  const data = quota.data;
+  status.textContent = `上次查询：${quotaTime(data.fetched_at)}（本地时间）`;
+  if (data.ordinary_usage_allowed === false) quotaText(content, "p", "服务当前不允许使用订阅内额度。", "quota-warning");
+  if (!data.buckets.length) quotaText(content, "p", "服务暂未提供额度数据，不代表额度为零。", "quota-empty");
+  for (const bucket of data.buckets) {
+    const group = document.createElement("div");
+    group.className = "quota-bucket";
+    content.append(group);
+    quotaText(group, "h4", bucket.name + (bucket.plan ? ` · ${bucket.plan}` : ""));
+    if (!bucket.windows.length) quotaText(group, "p", "用量窗口：未提供", "muted");
+    for (const window of bucket.windows) {
+      const row = document.createElement("div");
+      row.className = "quota-window";
+      group.append(row);
+      quotaText(row, "p", window.label, "quota-window-label");
+      if (window.remaining_percent == null) {
+        quotaText(row, "p", "用量未提供", "muted");
+      } else {
+        quotaText(row, "strong", `剩余 ${window.remaining_percent}%`, "quota-remaining");
+        const progress = document.createElement("progress");
+        progress.max = 100;
+        progress.value = window.remaining_percent;
+        progress.setAttribute("aria-label", `${bucket.name} ${window.label} 剩余额度`);
+        if (window.remaining_percent <= 20) progress.classList.add("low");
+        row.append(progress);
+        quotaText(row, "p", `已用 ${window.used_percent}%`, "muted");
+      }
+      quotaText(row, "p", `重置：${quotaTime(window.resets_at)}${window.resets_at == null ? "" : "（本地时间）"}`, "muted");
+    }
+    const credits = bucket.credits;
+    if (credits) {
+      const balance = credits.unlimited ? "不限额" : credits.balance ?? (credits.has_credits === true ? "有可用额度，数值未提供" : credits.has_credits === false ? "无可用额度" : "未提供");
+      quotaText(group, "p", `Credits 余额：${balance}`, "quota-credits");
+    }
+    if (bucket.limit_message) quotaText(group, "p", bucket.limit_message, "quota-warning");
+    if (bucket.spend_control_reached) quotaText(group, "p", "已达到支出控制限制。", "quota-warning");
+  }
+  if (data.reset_credits != null) quotaText(content, "p", `可用额度重置次数：${data.reset_credits}（仅展示）`, "quota-credits");
+  if (data.truncated) quotaText(content, "p", "仅展示前 20 个额度分组。", "muted");
 }
 
 async function action(endpoint, payload = {}, resetForm = false) {
@@ -140,6 +214,7 @@ $("settings-form").addEventListener("submit", (event) => {
 $("reset").addEventListener("click", () => { fillForm(current.settings); controls(); notice(""); });
 $("login").addEventListener("click", () => { void action("login"); });
 $("refresh").addEventListener("click", () => { void action("refresh"); });
+$("refresh-quota").addEventListener("click", () => { void action("quota"); });
 $("logout").addEventListener("click", () => { void action("logout"); });
 $("cancel").addEventListener("click", () => { void action("cancel"); });
 $("copy-code").addEventListener("click", () => { void copyField("device-code"); });

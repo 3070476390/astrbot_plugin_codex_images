@@ -8,7 +8,7 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand"><span class="brand-icon" aria-hidden="true">✦</span><div><h1>Codex 绘图</h1><p>账号与绘图设置</p></div><span class="version">v0.3.0</span></div>
+    <div class="brand"><span class="brand-icon" aria-hidden="true">✦</span><div><h1>Codex 绘图</h1><p>账号与绘图设置</p></div><span class="version">v0.4.0</span></div>
     <div class="connection"><span id="connection-dot" class="dot"></span><span id="connection-text">正在连接插件…</span></div>
   </header>
   <main>
@@ -31,6 +31,12 @@
           <div class="account-actions"><button id="cancel" type="button" disabled>取消当前任务</button><button id="logout" class="danger-text" type="button" disabled>退出账号</button></div>
           <p class="privacy-note">在 OpenAI 官方页面完成授权。登录凭据保存在机器人服务器，不需要在聊天中发送密码。</p>
           <p id="personal-note" class="mode-note" hidden>当前为独立账号模式。每位用户通过私聊 <code>/codex登录</code> 管理自己的账号；此卡片仍显示保留的统一账号。</p>
+        </section>
+        <section class="card quota-card" aria-labelledby="quota-title">
+          <div class="card-heading"><h3 id="quota-title">账号额度</h3><button id="refresh-quota" type="button" class="small" disabled>刷新额度</button></div>
+          <p id="quota-status" class="muted" role="status">登录后点击刷新额度。</p>
+          <div id="quota-content"></div>
+          <p class="muted footnote">显示上次查询快照，任务结束后可手动刷新。账号额度不能换算为剩余图片张数。</p>
         </section>
         <section class="card" aria-labelledby="overview-title">
           <div class="card-heading"><h3 id="overview-title">运行概览</h3><span class="live-label">实时</span></div>
@@ -62,7 +68,7 @@
             <div class="form-footer"><p>有任务运行时，请先等待完成再保存。</p><div><button id="reset" type="button" disabled>还原修改</button><button id="save" type="submit" class="primary" disabled>保存设置</button></div></div>
           </form>
         </section>
-        <section class="quick-start"><div class="quick-icon" aria-hidden="true">✎</div><div><h3>连接完成，去聊天里试一试</h3><p>文生图：/codex画图 图片描述<br>图生图：附带或引用一张图片，发送 /codex改图 修改要求<br>模型列表：/codex模型，可带页码。</p><code>/codex改图 保留主体，把背景改成雪山</code></div><span class="tag subtle">文生图 · 图生图</span></section>
+        <section class="quick-start"><div class="quick-icon" aria-hidden="true">✎</div><div><h3>连接完成，去聊天里试一试</h3><p>文生图：/codex画图 图片描述<br>图生图：附带或引用一张图片，发送 /codex改图 修改要求<br>模型列表：/codex模型，可带页码。<br>账号额度：/codex额度，查看用量与重置时间。</p><code>/codex改图 保留主体，把背景改成雪山</code></div><span class="tag subtle">文生图 · 图生图</span></section>
       </div>
     </div>
     <footer class="page-footer">Codex 绘图 · AstrBot 扩展功能 <span>账号由管理员管理，创意由你开始。</span></footer>

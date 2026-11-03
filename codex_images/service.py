@@ -8,8 +8,9 @@ from urllib.parse import urlparse
 from uuid import uuid4
 from collections.abc import Awaitable, Callable
 
-from .errors import PluginError
+from .errors import PluginError, RpcError
 from .images import image_suffix, save_image
+from .quota import normalize_quota
 from .rpc import AppServer
 
 CONFIG = '''cli_auth_credentials_store = "file"
@@ -234,6 +235,20 @@ class ImageService:
                     break
                 cursors.add(cursor)
             raise PluginError("模型列表分页异常或数量过多，请检查 Codex 版本后重试。")
+
+    async def read_quota(self, key: str) -> dict:
+        """Read a fresh snapshot, without inference or consuming reset credits."""
+        async with self.session(key) as state:
+            account = (await state.rpc.request("account/read", {"refreshToken": False})).get("account")
+            if not account or account.get("type") != "chatgpt":
+                raise PluginError("请先完成绘图账号登录，再查询额度。")
+            try:
+                result = await state.rpc.request("account/rateLimits/read")
+            except RpcError as exc:
+                if exc.code == -32601:
+                    raise PluginError("当前 Codex CLI 不支持额度查询，请升级兼容版本后重试。") from exc
+                raise
+            return normalize_quota(result)
 
     async def _reference_bytes(self, state: Session, loader: Callable[[], Awaitable[bytes]]) -> bytes:
         loading = asyncio.create_task(loader())

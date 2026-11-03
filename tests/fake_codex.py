@@ -41,6 +41,21 @@ for line in sys.stdin:
             event("account/login/completed", {"loginId": "login", "success": True})
     elif method == "account/logout":
         authenticated = False
+    elif method == "account/rateLimits/read":
+        if mode in {"quota_unsupported", "quota_error"}:
+            send({"id": request["id"], "error": {"code": -32601 if mode == "quota_unsupported" else 401, "message": "secret-token"}})
+            continue
+        if mode == "quota_empty":
+            result = {"rateLimits": {}}
+        else:
+            result = {"accountId": "secret-account", "rateLimits": {
+                "limitId": "codex", "planType": "plus",
+                "primary": {"usedPercent": 25, "windowDurationMins": 300, "resetsAt": 1793700000},
+                "secondary": {"usedPercent": 80, "windowDurationMins": 10080, "resetsAt": 1794200000},
+                "credits": {"hasCredits": False, "unlimited": False, "balance": "0"},
+            }}
+    elif method.startswith("account/rateLimit"):
+        raise AssertionError("Quota reads must not consume reset credits")
     elif method == "model/list":
         model_a = {"id": "a", "model": "model-a", "displayName": "Model A", "isDefault": True,
                    "inputModalities": ["text", "image"]}

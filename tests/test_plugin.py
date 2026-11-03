@@ -242,3 +242,29 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
         for command in ["codex模型 abc", "codex模型 0", "codex模型 2 3"]:
             await self._consume(self.plugin.models_command(Event(command, sender="admin")))
             self.plugin.service.list_models.assert_not_called()
+
+    async def test_quota_command_permissions_and_account_selection(self):
+        from codex_images.quota import normalize_quota
+        self.plugin.service.read_quota = AsyncMock(return_value=normalize_quota({"rateLimits": {}}))
+        own_key = self.plugin._check(Event())
+        reply = (await self._consume(self.plugin.quota_command(Event("codex额度"))))[0]
+        self.assertIn("我的账号", reply)
+        self.plugin.service.read_quota.assert_awaited_once_with(own_key)
+        self.plugin.service.read_quota.reset_mock()
+        self.plugin.config.update(account_mode="shared", allowed_users=[])
+        reply = (await self._consume(self.plugin.quota_command(Event("codex额度"))))[0]
+        self.assertIn("使用名单", reply)
+        self.plugin.service.read_quota.assert_not_awaited()
+        self.plugin.config["allowed_users"] = ["qq:1"]
+        reply = (await self._consume(self.plugin.quota_command(Event("codex额度"))))[0]
+        self.assertIn("统一账号", reply)
+        self.plugin.service.read_quota.assert_awaited_once_with(self.plugin._account_key(own_key))
+
+    async def test_quota_group_and_busy_checks_precede_service(self):
+        self.plugin.service.read_quota = AsyncMock()
+        reply = (await self._consume(self.plugin.quota_command(Event(private=False))))[0]
+        self.assertIn("私聊", reply)
+        self.plugin.image_owners[self.plugin._check(Event())] = "owner"
+        reply = (await self._consume(self.plugin.quota_command(Event())))[0]
+        self.assertIn("等待完成", reply)
+        self.plugin.service.read_quota.assert_not_awaited()

@@ -98,9 +98,44 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_logout_uses_shared_account(self):
         self.plugin.service.logout = AsyncMock()
+        self.controller.quota = {"status": "ready", "data": {}}
         state = await self.controller.logout()
         self.plugin.service.logout.assert_awaited_once_with(self.key)
         self.assertEqual(state["account"]["status"], "signed_out")
+        self.assertIsNone(state["quota"])
+
+    async def test_quota_is_explicit_and_cached_only_for_state_polling(self):
+        from codex_images.quota import normalize_quota
+        snapshot = normalize_quota({"rateLimits": {"primary": {"usedPercent": 25}}})
+        self.plugin.service.read_quota = AsyncMock(return_value=snapshot)
+        state = await self.controller.refresh_quota()
+        self.assertEqual(state["quota"]["data"], snapshot)
+        self.assertEqual(self.controller.state()["quota"]["status"], "ready")
+        self.plugin.service.read_quota.assert_awaited_once_with(self.key)
+        state["quota"]["data"]["buckets"].clear()
+        self.assertTrue(self.controller.state()["quota"]["data"]["buckets"])
+        self.plugin.service.read_quota = AsyncMock(side_effect=RuntimeError("credential-secret"))
+        state = await self.controller.refresh_quota()
+        self.assertEqual(state["quota"]["status"], "error")
+        self.assertNotIn("data", state["quota"])
+        self.assertNotIn("credential-secret", str(state))
+
+    async def test_quota_respects_mode_and_busy_and_clears_on_account_change(self):
+        self.plugin.service.read_quota = AsyncMock()
+        self.plugin.config["account_mode"] = "personal"
+        with self.assertRaisesRegex(Exception, "独立账号"):
+            await self.controller.refresh_quota()
+        self.plugin.config["account_mode"] = "shared"
+        self.plugin.image_owners[self.key] = "owner"
+        with self.assertRaisesRegex(Exception, "任务"):
+            await self.controller.refresh_quota()
+        self.plugin.service.read_quota.assert_not_awaited()
+        self.plugin.image_owners.clear()
+        self.controller.quota = {"status": "ready", "data": {}}
+        self.plugin.service.status = AsyncMock(return_value={"logged_in": False})
+        self.assertIsNone((await self.controller.refresh())["quota"])
+        self.controller.quota = {"status": "ready", "data": {}}
+        self.assertIsNone((await self.controller.save_settings({"account_mode": "personal"}))["quota"])
 
     async def test_dashboard_routes_require_actual_dashboard_admin(self):
         web = types.ModuleType("astrbot.api.web")
@@ -120,10 +155,10 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
                                         register_web_api=lambda *args: routes.append(args))
         endpoint = module.DashboardAPI(context, self.controller)
         endpoint.register()
-        self.assertEqual(len(routes), 6)
+        self.assertEqual(len(routes), 7)
         for username in [None, "another-user", "api_key:123"]:
             request.username = username
-            for handler in [endpoint.state, endpoint.refresh, endpoint.login, endpoint.logout, endpoint.cancel, endpoint.settings]:
+            for handler in [endpoint.state, endpoint.refresh, endpoint.login, endpoint.logout, endpoint.cancel, endpoint.settings, endpoint.quota]:
                 result = await handler()
                 self.assertEqual(result[0], 403)
         request.json.assert_not_awaited()

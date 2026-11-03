@@ -19,7 +19,10 @@ const settings = Object.fromEntries(Object.entries(schema).map(([key, value]) =>
       await route.fulfill({ path: path.join(root, 'views/dashboard', name), contentType: name.endsWith('.js') ? 'text/javascript' : name.endsWith('.css') ? 'text/css' : 'text/html' });
     });
     await page.addInitScript(settings => {
-      let state = {version: '0.3.0', settings, account: {status: 'signed_out', message: '尚未登录统一账号。'}, login_pending: false, busy: false, active_tasks: 0};
+      let state = {version: '0.4.0', settings, account: {status: 'signed_out', message: '尚未登录统一账号。'}, quota: null, login_pending: false, busy: false, active_tasks: 0};
+      window.quotaMode = 'ready';
+      window.quotaCalls = 0;
+      window.setBusy = value => {state.busy = value;};
       window.rejectSave = false;
       window.finishLogin = () => {state.account = {status: 'logged_in', message: '统一账号登录成功，可以向机器人发送绘图指令。'};state.login_pending = false;};
       window.AstrBotPluginView = {
@@ -29,6 +32,7 @@ const settings = Object.fromEntries(Object.entries(schema).map(([key, value]) =>
           if (endpoint.endsWith('/settings')) {
             if (window.rejectSave) throw new Error('模拟保存失败，请重试');
             state.settings = body;
+            state.quota = null;
           }
           if (endpoint.endsWith('/login')) {
             state.account = {status: 'waiting', message: '请在浏览器新标签页打开官方地址，输入设备码完成登录。', code: 'TEST-1234', url: 'https://auth.openai.com/codex/device'};
@@ -37,6 +41,17 @@ const settings = Object.fromEntries(Object.entries(schema).map(([key, value]) =>
           if (endpoint.endsWith('/cancel') || endpoint.endsWith('/logout')) {
             state.account = {status: 'signed_out', message: '统一账号已退出。'};
             state.login_pending = false;
+            state.quota = null;
+          }
+          if (endpoint.endsWith('/quota')) {
+            window.quotaCalls++;
+            state.quota = window.quotaMode === 'error' ? {status: 'error', message: '额度查询失败，请检查网络。'} : {
+              status: 'ready', data: {fetched_at: 1793700000, ordinary_usage_allowed: false, reset_credits: 0, truncated: false,
+                buckets: window.quotaMode === 'empty' ? [] : [{name: 'codex', plan: 'plus', limit_message: null, spend_control_reached: false,
+                  windows: [{label: '5 小时窗口', used_percent: 25, remaining_percent: 75, resets_at: 1793703600},
+                            {label: '7 天窗口', used_percent: 100, remaining_percent: 0, resets_at: null}],
+                  credits: {balance: '0', has_credits: false, unlimited: false}}]}
+            };
           }
           return structuredClone(state);
         }
@@ -45,6 +60,7 @@ const settings = Object.fromEntries(Object.entries(schema).map(([key, value]) =>
     await page.goto('http://127.0.0.1:9911/');
     await page.getByText('已连接插件后端').waitFor();
     assert.equal(await page.locator('#users-summary').innerText(), '仅聊天管理员');
+    assert.equal(await page.locator('#refresh-quota').isDisabled(), true);
     await page.locator('#allowed_users').fill('qq_bot:123456789');
     await page.locator('#allow_group_images').check();
     await page.locator('#save').click();
@@ -68,6 +84,18 @@ const settings = Object.fromEntries(Object.entries(schema).map(([key, value]) =>
     assert.equal(await page.locator('#model').inputValue(), 'draft-model');
     await page.locator('#reset').click();
     assert.equal(await page.locator('#model').inputValue(), '');
+    await page.locator('#refresh-quota').click();
+    await page.getByText('剩余 75%', {exact: true}).waitFor();
+    assert.equal(await page.locator('progress').first().getAttribute('value'), '75');
+    assert.equal(await page.locator('progress').nth(1).getAttribute('value'), '0');
+    assert.ok((await page.locator('#quota-content').innerText()).includes('重置：未提供'));
+    assert.ok((await page.locator('#quota-content').innerText()).includes('Credits 余额：0'));
+    assert.ok((await page.locator('#quota-status').innerText()).includes('本地时间'));
+    await page.evaluate(() => window.setBusy(true));
+    await page.waitForFunction(() => document.querySelector('#refresh-quota').disabled);
+    assert.equal(await page.evaluate(() => window.quotaCalls), 1, 'state polling must not fetch quota');
+    await page.evaluate(() => window.setBusy(false));
+    await page.waitForFunction(() => !document.querySelector('#refresh-quota').disabled);
     fs.mkdirSync(path.join(root, 'dist'), { recursive: true });
     await page.screenshot({ path: path.join(root, 'dist/dashboard-preview.png'), fullPage: true });
     await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
@@ -78,10 +106,24 @@ const settings = Object.fromEntries(Object.entries(schema).map(([key, value]) =>
     await page.setViewportSize({ width: 390, height: 844 });
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'mobile overflow');
     await page.screenshot({ path: path.join(root, 'dist/dashboard-mobile.png'), fullPage: true });
+    await page.evaluate(() => {window.quotaMode = 'empty';});
+    await page.locator('#refresh-quota').click();
+    await page.getByText('服务暂未提供额度数据，不代表额度为零。').waitFor();
+    assert.equal(await page.locator('progress').count(), 0);
+    await page.evaluate(() => {window.quotaMode = 'error';});
+    await page.locator('#refresh-quota').click();
+    await page.getByText('额度查询失败，请检查网络。', {exact: true}).waitFor();
+    assert.equal(await page.locator('progress').count(), 0);
+    await page.evaluate(() => {window.rejectSave = false;});
+    await page.locator('#account_mode').selectOption('personal');
+    await page.locator('#save').click();
+    await page.getByText('独立账号模式：请私聊发送 /codex额度 查询自己的账号。').waitFor();
+    assert.equal(await page.locator('#refresh-quota').isDisabled(), true);
     await page.locator('#logout').click();
     await page.getByText('统一账号已退出。').first().waitFor();
+    assert.equal(await page.locator('progress').count(), 0);
     assert.deepEqual(errors, []);
-    console.log('PASS: bridge initialization, login polling, hidden expired codes, allowlist/settings save, dirty draft preservation, save failure, reset, logout, mobile layout and theme rendering');
+    console.log('PASS: account/settings flow, quota windows and missing/error states, explicit refresh, busy/personal restrictions, logout cleanup, mobile layout and themes');
   } finally {
     await browser.close();
   }

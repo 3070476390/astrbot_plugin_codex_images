@@ -1,7 +1,7 @@
 name: astrbot_plugin_codex_images
 display_name: Codex 绘图
-desc: 在扩展页面管理 Codex 账号，支持文生图、图生图与账号可见模型查询。
-version: v0.3.0
+desc: 在扩展页面管理 Codex 账号，支持文生图、图生图、模型查询与账号额度展示。
+version: v0.4.0
 author: snowy
 repo: https://github.com/3070476390/astrbot_plugin_codex_images
 astrbot_version: ">=4.29.4,<5"

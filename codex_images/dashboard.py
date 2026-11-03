@@ -17,6 +17,7 @@ class DashboardController:
         self.login_task = None
         self.lock = asyncio.Lock()
         self.account = {"status": "unknown", "message": "点击刷新检查统一账号的登录状态。"}
+        self.quota = None
 
     @property
     def service(self):
@@ -28,9 +29,10 @@ class DashboardController:
 
     def state(self):
         return {
-            "version": "0.3.0",
+            "version": "0.4.0",
             "settings": {k: copy.deepcopy(self.plugin.config.get(k, v["default"])) for k, v in SCHEMA.items()},
             "account": dict(self.account),
+            "quota": copy.deepcopy(self.quota) if self.plugin.account_mode == "shared" else None,
             "login_pending": self.login_pending,
             "busy": SHARED_KEY in self.service.sessions or SHARED_KEY in self.plugin.image_owners,
             "active_tasks": len(self.service.sessions),
@@ -43,6 +45,24 @@ class DashboardController:
                 if not result.get("busy"):
                     self.account = {"status": "logged_in" if result["logged_in"] else "signed_out",
                                     "message": "账号已登录，图像权限以实际绘图结果为准。" if result["logged_in"] else "尚未登录统一账号。"}
+                    if not result["logged_in"]:
+                        self.quota = None
+            return self.state()
+
+    async def refresh_quota(self):
+        async with self.lock:
+            if self.plugin.account_mode != "shared":
+                raise PluginError("独立账号模式请私聊发送 /codex额度 查询自己的账号。")
+            if self.login_pending or SHARED_KEY in self.service.sessions or SHARED_KEY in self.plugin.image_owners:
+                raise PluginError("统一账号正在执行任务，请等待完成后刷新额度。")
+            # A failed refresh must never leave old percentages looking current.
+            self.quota = None
+            try:
+                self.quota = {"status": "ready", "data": await self.service.read_quota(SHARED_KEY)}
+            except PluginError as exc:
+                self.quota = {"status": "error", "message": str(exc)}
+            except Exception:
+                self.quota = {"status": "error", "message": "额度查询失败，请检查 Codex 配置和网络。"}
             return self.state()
 
     async def start_login(self):
@@ -54,6 +74,7 @@ class DashboardController:
             if SHARED_KEY in self.service.sessions or SHARED_KEY in self.plugin.image_owners:
                 raise PluginError("统一账号正在执行任务，请等待完成或先取消。")
             self.account = {"status": "starting", "message": "正在获取官方设备码…"}
+            self.quota = None
             self.login_task = asyncio.create_task(self._login())
             return self.state()
 
@@ -84,6 +105,7 @@ class DashboardController:
             await self.plugin.cancel_image(SHARED_KEY)
             # Remove stale device codes, without claiming logout occurred.
             self.account = {"status": "unknown", "message": "已取消任务；如需确认登录状态，请点击刷新。"}
+            self.quota = None
             return self.state()
 
     async def logout(self):
@@ -93,6 +115,7 @@ class DashboardController:
                 self.plugin.cancelled_images.add(SHARED_KEY)
             await self.service.logout(SHARED_KEY)
             self.account = {"status": "signed_out", "message": "统一账号已退出。"}
+            self.quota = None
             return self.state()
 
     async def save_settings(self, payload):
@@ -133,6 +156,7 @@ class DashboardController:
                 self.plugin.config.update(old)
                 raise PluginError("配置保存失败，当前运行设置未更改。") from exc
             self.service.settings = settings
+            self.quota = None
             return self.state()
 
     async def close(self):

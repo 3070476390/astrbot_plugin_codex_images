@@ -15,6 +15,7 @@ class DashboardAPI:
             ("state", "GET", self.state), ("refresh", "POST", self.refresh),
             ("login", "POST", self.login), ("logout", "POST", self.logout),
             ("cancel", "POST", self.cancel), ("settings", "POST", self.settings),
+            ("quota", "POST", self.quota),
         ):
             self.context.register_web_api(f"/astrbot_plugin_codex_images/dashboard/{endpoint}", handler, [method], "Codex 绘图管理")
 
@@ -40,6 +41,9 @@ class DashboardAPI:
 
     async def refresh(self):
         return await self._run(self.controller.refresh)
+
+    async def quota(self):
+        return await self._run(self.controller.refresh_quota)
 
     async def login(self):
         return await self._run(self.controller.start_login)
