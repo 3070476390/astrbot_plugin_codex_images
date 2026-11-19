@@ -12,6 +12,7 @@ from .codex_images.service import ImageService, Settings, user_key
 from .codex_images.dashboard import DashboardController, SHARED_KEY
 from .codex_images.drawing import DRAWING_ID, DrawingRequest, RedrawHistory, parse_drawing_prompt
 from .codex_images.message_images import load_reference, quoted_drawing_id, reference_from_message
+from .codex_images.openai_images import API_JOB_KEY, api_key
 from .codex_images.quota import format_quota
 
 
@@ -43,8 +44,18 @@ class CodexImagesPlugin(Star):
         reserved = key in self.image_owners
         if reserved:
             self.cancelled_images.add(key)
-        stopped = await self.service.cancel(key)
+        stopped = await self.service.cancel_api() if key == API_JOB_KEY else await self.service.cancel(key)
         return reserved or stopped
+
+    async def _backend(self, caller):
+        stored = await self.get_kv_data(f"drawing_backend:{caller}", "codex")
+        return "api" if stored == "api" else "codex"
+
+    def _require_api(self):
+        if self.config.get("openai_api_enabled") is not True:
+            raise PluginError("管理员尚未启用 OpenAI API 绘图。可发送 /codex模式 Codex 使用订阅模式。")
+        if not api_key():
+            raise PluginError("服务器尚未配置 OpenAI API Key，请联系管理员。")
 
     def _check(self, event, private=False):
         if private and not event.is_private_chat():
@@ -73,16 +84,45 @@ class CodexImagesPlugin(Star):
             "/codex登录：私聊获取官方设备码并登录\n/codex退出：退出自己的账号\n"
         )
         yield event.plain_result(
-            "Codex 订阅绘图\n" + account_help +
+            "Codex 绘图\n" + account_help +
+            "/codex模式 [Codex|API]：查询或切换自己的绘图模式\n"
             "/codex状态：查询登录状态\n"
             "/codex画图 [--比例 9:16] 图片描述：生成一张图，支持 1:1、9:16、16:9\n"
             "/codex改图 [--比例 9:16] 修改要求：附带或引用一张图\n"
             "/codex重绘 [编号]：引用自己的出图结果，或输入重绘编号再生成一张\n"
-            "/codex模型 [页码]：查询账号可见的模型及图片输入能力\n"
-            "/codex额度：查询账号剩余额度百分比和重置时间\n"
+            "/codex模型 [页码]：查看当前模式的模型\n"
+            "/codex额度：查看当前模式的用量查询方式\n"
             "/codex取消：停止当前登录或绘图任务\n"
             "是否能生成图片取决于账号权限和可用额度。"
         )
+
+    @filter.command("codex模式")
+    async def mode_command(self, event: AstrMessageEvent):
+        """查询或切换自己的绘图模式。"""
+        try:
+            caller = self._check(event)
+            parts = event.get_message_str().split(maxsplit=1)
+            selected = parts[1].strip().lower() if len(parts) == 2 else await self._backend(caller)
+            if selected not in {"codex", "api"}:
+                raise PluginError("用法：/codex模式、/codex模式 Codex 或 /codex模式 API")
+            if len(parts) == 2:
+                if selected == "api":
+                    self._require_api()
+                await self.put_kv_data(f"drawing_backend:{caller}", selected)
+            if selected == "api":
+                message = "当前绘图模式为 OpenAI API，绘图用量计入管理员配置的 API 项目。"
+                try:
+                    self._require_api()
+                except PluginError as exc:
+                    message += "\n" + str(exc)
+            else:
+                message = "当前绘图模式为 Codex，绘图使用 Codex 订阅额度。"
+            yield event.plain_result(message)
+        except PluginError as exc:
+            yield event.plain_result(str(exc))
+        except Exception as exc:
+            logger.error("绘图模式设置异常 (%s)", type(exc).__name__)
+            yield event.plain_result("无法读取或保存绘图模式，请稍后重试。")
 
     @filter.command("codex登录")
     async def login_command(self, event: AstrMessageEvent):
@@ -110,7 +150,12 @@ class CodexImagesPlugin(Star):
     async def status_command(self, event: AstrMessageEvent):
         """查看自己的登录状态（仅私聊）。"""
         try:
-            state = await self.service.status(self._account_key(self._check(event, private=True)))
+            caller = self._check(event, private=True)
+            if await self._backend(caller) == "api":
+                self._require_api()
+                yield event.plain_result("当前使用 OpenAI API 模式，服务器已配置密钥。模型权限以实际请求为准。")
+                return
+            state = await self.service.status(self._account_key(caller))
             if state.get("busy"):
                 message = "当前有任务正在进行，可发送 /codex取消 停止。"
             else:
@@ -129,7 +174,11 @@ class CodexImagesPlugin(Star):
     async def quota_command(self, event: AstrMessageEvent):
         """查询当前绘图账号的额度快照。"""
         try:
-            key = self._account_key(self._check(event))
+            caller = self._check(event)
+            if await self._backend(caller) == "api":
+                yield event.plain_result("当前使用 OpenAI API 模式。请由管理员在 https://platform.openai.com/usage 查看项目用量。")
+                return
+            key = self._account_key(caller)
             if key in self.image_owners or (self.account_mode == "shared" and self.dashboard.login_pending):
                 raise PluginError("绘图账号正在执行任务，请等待完成后查询额度。")
             data = await self.service.read_quota(key)
@@ -160,8 +209,8 @@ class CodexImagesPlugin(Star):
         """停止自己的登录或绘图任务。"""
         try:
             caller = self._check(event)
-            key = self._account_key(caller)
-            if self.account_mode == "shared" and self.image_owners.get(key) != caller:
+            key = API_JOB_KEY if self.image_owners.get(API_JOB_KEY) == caller else self._account_key(caller)
+            if key == SHARED_KEY and self.image_owners.get(key) != caller:
                 raise PluginError("你当前没有正在运行的绘图任务。")
             cancelled = await self.cancel_image(key)
             yield event.plain_result("已停止当前任务。" if cancelled else "当前没有正在运行的任务。")
@@ -172,13 +221,20 @@ class CodexImagesPlugin(Star):
     async def models_command(self, event: AstrMessageEvent):
         """查询当前绘图账号可见的调度模型，可带页码。"""
         try:
-            key = self._account_key(self._check(event))
+            caller = self._check(event)
             parts = event.get_message_str().strip().split()
             if len(parts) > 2 or (len(parts) == 2 and (not parts[1].isascii() or not parts[1].isdigit() or len(parts[1]) > 6)):
                 raise PluginError("用法：/codex模型 或 /codex模型 2")
             page = int(parts[1]) if len(parts) == 2 else 1
             if page < 1:
                 raise PluginError("页码从 1 开始。")
+            if await self._backend(caller) == "api":
+                self._require_api()
+                if page != 1:
+                    raise PluginError("当前 API 图像模型只显示在第 1 页。")
+                yield event.plain_result(f"当前 OpenAI API 图像模型为 {self.service.settings.openai_image_model}。")
+                return
+            key = self._account_key(caller)
             models = await self.service.list_models(key)
             if not models:
                 raise PluginError("Codex 没有返回可见模型，请检查账号权限或 CLI 版本。")
@@ -231,7 +287,11 @@ class CodexImagesPlugin(Star):
         reserved_key = None
         try:
             caller = self._check(event)
-            key = self._account_key(caller)
+            use_api = await self._backend(caller) == "api"
+            self._check(event)
+            if use_api:
+                self._require_api()
+            key = API_JOB_KEY if use_api else self._account_key(caller)
             # Parse the original message to preserve whitespace/newlines in prompts.
             # AstrBot strips the wake prefix before dispatching commands.
             parts = event.get_message_str().strip().split(maxsplit=1)
@@ -243,7 +303,8 @@ class CodexImagesPlugin(Star):
                 if not drawing_id or not DRAWING_ID.fullmatch(drawing_id):
                     raise PluginError("请引用带重绘编号的出图结果发送 /codex重绘，或直接发送 /codex重绘 编号。")
                 drawing = self.redraw_history.get(drawing_id, scope)
-                prompt, ratio, model, reference_data = drawing.prompt, drawing.ratio, drawing.model, drawing.reference
+                prompt, ratio, model = drawing.prompt, drawing.ratio, drawing.model
+                reference_data, quality = drawing.reference, drawing.quality
             else:
                 prompt, ratio = parse_drawing_prompt(arguments)
                 if not prompt:
@@ -252,19 +313,20 @@ class CodexImagesPlugin(Star):
                 if require_reference and reference is None:
                     raise PluginError("没有找到参考图，请将图片与 /codex改图 修改要求 一起发送，或引用一条带图消息。")
                 drawing_id = uuid4().hex[:12]
-                model = self.service.settings.model
+                settings = self.service.settings
+                model = settings.openai_image_model if use_api else settings.model
+                quality = settings.openai_image_quality if use_api else None
             if key in self.image_owners or (key == SHARED_KEY and self.dashboard.login_pending):
                 raise PluginError("绘图账号正在处理其他任务，请稍后重试。")
+            if caller in self.image_owners.values():
+                raise PluginError("你已有绘图任务，可发送 /codex取消 停止。")
             self.image_owners[key] = caller
             reserved_key = key
-            await event.send(event.plain_result("正在生成图片，请稍候。可发送 /codex取消 停止任务。"))
+            prefix = "OpenAI API（按量计费）" if use_api else ""
+            await event.send(event.plain_result(f"{prefix}正在生成图片，请稍候。可发送 /codex取消 停止任务。"))
             if key in self.cancelled_images:
                 raise PluginError("任务已取消。")
             options = {}
-            if ratio is not None:
-                options["ratio"] = ratio
-            if redraw or model:
-                options["model"] = model
             if reference is not None or reference_data is not None:
                 async def loader():
                     nonlocal reference_data
@@ -274,21 +336,33 @@ class CodexImagesPlugin(Star):
                         )
                     return reference_data
                 options["reference_loader"] = loader
-            paths = await self.service.generate(key, prompt, **options)
+            if use_api:
+                paths = await self.service.generate_api(
+                    caller, prompt, ratio=ratio, model=model, quality=quality, **options,
+                )
+            else:
+                if ratio is not None:
+                    options["ratio"] = ratio
+                if redraw or model:
+                    options["model"] = model
+                paths = await self.service.generate(key, prompt, **options)
             if key in self.cancelled_images:
                 raise PluginError("任务已取消。")
             for path in paths:
                 # Await delivery before deleting the temporary output.
                 result = event.image_result(str(path))
-                result.chain.append(Plain(f"再次生成 /codex重绘 {drawing_id}"))
+                label = "OpenAI API · " if use_api else ""
+                result.chain.append(Plain(f"{label}再次生成 /codex重绘 {drawing_id}"))
                 await event.send(result)
             if paths and not self.service.closing:
-                self.redraw_history.remember(drawing_id, scope, DrawingRequest(prompt, ratio, model, reference_data))
+                self.redraw_history.remember(
+                    drawing_id, scope, DrawingRequest(prompt, ratio, model, reference_data, quality),
+                )
         except PluginError as exc:
             yield event.plain_result(str(exc))
         except Exception as exc:
-            logger.error("Codex 绘图异常 (%s)", type(exc).__name__)
-            yield event.plain_result("绘图或图片发送失败，请检查消息平台和 Codex 配置。")
+            logger.error("绘图异常 (%s)", type(exc).__name__)
+            yield event.plain_result("绘图或图片发送失败，请检查当前绘图模式和消息平台。")
         finally:
             if reserved_key is not None:
                 self.image_owners.pop(reserved_key, None)

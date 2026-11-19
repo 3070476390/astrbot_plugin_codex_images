@@ -8,7 +8,7 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand"><span class="brand-icon" aria-hidden="true">✦</span><div><h1>Codex 绘图</h1><p>账号与绘图设置</p></div><span class="version">v0.6.0</span></div>
+    <div class="brand"><span class="brand-icon" aria-hidden="true">✦</span><div><h1>Codex 绘图</h1><p>账号与绘图设置</p></div><span class="version">v0.7.0</span></div>
     <div class="connection"><span id="connection-dot" class="dot"></span><span id="connection-text">正在连接插件…</span></div>
   </header>
   <main>
@@ -65,6 +65,17 @@
                 <div class="field"><label for="login_timeout">登录等待 <span class="unit">秒</span></label><input id="login_timeout" name="login_timeout" type="number" min="30" max="1800" step="1" required></div>
                 <div class="field"><label for="max_image_mb">图片大小上限 <span class="unit">MB</span></label><input id="max_image_mb" name="max_image_mb" type="number" min="1" max="30" step="1" required></div>
               </div></details>
+              <div class="divider"></div>
+              <div class="section-label"><h4>OpenAI API 绘图</h4></div>
+              <div class="field">
+                <label class="toggle-row" for="openai_api_enabled"><span><strong>允许切换到 API 模式</strong><small>有绘图权限的用户可发送 /codex模式 API。出图按 OpenAI API 项目用量计费。</small></span><input id="openai_api_enabled" name="openai_api_enabled" type="checkbox" role="switch"></label>
+                <p id="openai-key-status" class="hint" role="status"></p>
+                <p class="hint">在 AstrBot 进程环境中设置 <code>ASTRBOT_CODEX_IMAGES_OPENAI_API_KEY</code>。</p>
+              </div>
+              <div class="two-columns">
+                <div class="field"><label for="openai_image_model">图像模型</label><input id="openai_image_model" name="openai_image_model" placeholder="gpt-image-2.6-flare" maxlength="100" spellcheck="false" required></div>
+                <div class="field"><label for="openai_image_quality">出图质量</label><select id="openai_image_quality" name="openai_image_quality"><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select></div>
+              </div>
             </fieldset>
             <div class="form-footer"><p>有任务运行时，请先等待完成再保存。</p><div><button id="reset" type="button" disabled>还原修改</button><button id="save" type="submit" class="primary" disabled>保存设置</button></div></div>
           </form>

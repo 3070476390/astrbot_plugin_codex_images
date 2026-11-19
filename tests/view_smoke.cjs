@@ -19,7 +19,7 @@ const settings = Object.fromEntries(Object.entries(schema).map(([key, value]) =>
       await route.fulfill({ path: path.join(root, 'views/dashboard', name), contentType: name.endsWith('.js') ? 'text/javascript' : name.endsWith('.css') ? 'text/css' : 'text/html' });
     });
     await page.addInitScript(settings => {
-      let state = {version: '0.5.0', settings, account: {status: 'signed_out', message: '尚未登录统一账号。'}, quota: null, login_pending: false, busy: false, active_tasks: 0};
+      let state = {version: '0.7.0', settings, account: {status: 'signed_out', message: '尚未登录统一账号。'}, openai_key_configured: true, quota: null, login_pending: false, busy: false, active_tasks: 0};
       window.quotaMode = 'ready';
       window.quotaCalls = 0;
       window.setBusy = value => {state.busy = value;};
@@ -61,11 +61,19 @@ const settings = Object.fromEntries(Object.entries(schema).map(([key, value]) =>
     await page.getByText('已连接插件后端').waitFor();
     assert.equal(await page.locator('#users-summary').innerText(), '仅聊天管理员');
     assert.equal(await page.locator('#refresh-quota').isDisabled(), true);
+    assert.equal(await page.locator('#openai_api_enabled').isChecked(), false);
+    assert.equal(await page.locator('#openai-key-status').innerText(), '服务器已配置 API 密钥。');
+    await page.locator('#openai_api_enabled').check();
+    await page.locator('#openai_image_model').fill('gpt-image-2');
+    await page.locator('#openai_image_quality').selectOption('low');
     await page.locator('#allowed_users').fill('qq_bot:123456789');
     await page.locator('#allow_group_images').check();
     await page.locator('#save').click();
     await page.getByText('设置已保存，将用于下一次任务。').waitFor();
     assert.equal(await page.locator('#users-summary').innerText(), '1 位用户 + 管理员');
+    assert.equal(await page.locator('#openai_api_enabled').isChecked(), true);
+    assert.equal(await page.locator('#openai_image_model').inputValue(), 'gpt-image-2');
+    assert.equal(await page.locator('#openai_image_quality').inputValue(), 'low');
     // Enabling all users keeps the existing allowlist for later restoration.
     assert.equal(await page.locator('#allow_all_users').isChecked(), false);
     await page.locator('#allow_all_users').check();

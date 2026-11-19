@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+import re
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -10,7 +11,8 @@ from collections.abc import Awaitable, Callable
 
 from .drawing import RATIOS, RATIO_HELP
 from .errors import PluginError, RpcError
-from .images import crop_to_ratio, image_suffix, save_image
+from .images import crop_to_ratio, image_suffix, save_image, write_image
+from .openai_images import API_DEFAULT_MODEL, OpenAIImages
 from .quota import normalize_quota
 from .rpc import AppServer
 
@@ -68,6 +70,8 @@ class Settings:
     generation_timeout: int = 300
     max_image_bytes: int = 20 * 1024 * 1024
     max_prompt_chars: int = 4000
+    openai_image_model: str = API_DEFAULT_MODEL
+    openai_image_quality: str = "medium"
 
     @classmethod
     def from_config(cls, config):
@@ -77,6 +81,13 @@ class Settings:
                 raise ValueError(f"{name} 必须是 {low} 到 {high} 的整数")
             return value
 
+        api_model = config.get("openai_image_model", API_DEFAULT_MODEL)
+        if (not isinstance(api_model, str) or len(api_model) > 100
+                or not re.fullmatch(r"(?:gpt-image-[a-z0-9.-]+|chatgpt-image-latest)", api_model)):
+            raise ValueError("请填写有效的 GPT Image 模型 ID。")
+        api_quality = config.get("openai_image_quality", "medium")
+        if api_quality not in ("low", "medium", "high"):
+            raise ValueError("OpenAI API 出图质量必须为 low、medium 或 high。")
         return cls(
             executable=str(config.get("codex_command", "codex")).strip() or "codex",
             model=str(config.get("model", "")).strip(),
@@ -86,6 +97,8 @@ class Settings:
             generation_timeout=integer("generation_timeout", 300, 30, 1800),
             max_image_bytes=integer("max_image_mb", 20, 1, 30) * 1024 * 1024,
             max_prompt_chars=integer("max_prompt_chars", 4000, 1, 16000),
+            openai_image_model=api_model,
+            openai_image_quality=api_quality,
         )
 
 
@@ -105,7 +118,13 @@ class ImageService:
         self.settings = settings
         self.factory = factory
         self.sessions: dict[str, Session] = {}
+        self.api = OpenAIImages()
+        self.api_task: asyncio.Task[bytes] | None = None
         self.closing = False
+
+    @property
+    def active_tasks(self):
+        return len(self.sessions) + int(self.api_task is not None)
 
     @asynccontextmanager
     async def session(self, key: str):
@@ -113,7 +132,7 @@ class ImageService:
             raise PluginError("插件正在停止，请稍后重试。")
         if key in self.sessions:
             raise PluginError("你已有登录或绘图任务正在运行，请先完成或使用 /codex取消。")
-        if len(self.sessions) >= self.settings.max_sessions:
+        if self.active_tasks >= self.settings.max_sessions:
             raise PluginError("当前任务已满，请稍后重试。")
         # key is internal, but validate it before ever constructing a path.
         if len(key) != 64 or any(c not in "0123456789abcdef" for c in key):
@@ -268,11 +287,7 @@ class ImageService:
             cancellation.cancel()
             await asyncio.gather(loading, cancellation, return_exceptions=True)
 
-    async def generate(
-        self, key: str, prompt: str,
-        reference_loader: Callable[[], Awaitable[bytes]] | None = None,
-        *, ratio: str | None = None, model: str | None = None,
-    ) -> list[Path]:
+    def _validate_prompt(self, prompt: str, ratio: str | None) -> str:
         prompt = prompt.strip()
         if not prompt:
             raise PluginError("请输入图片描述，例如：/codex画图 雨中的猫咪，水彩风格")
@@ -280,6 +295,55 @@ class ImageService:
             raise PluginError(f"图片描述不能超过 {self.settings.max_prompt_chars} 个字符。")
         if ratio is not None and ratio not in RATIOS:
             raise PluginError(RATIO_HELP)
+        return prompt
+
+    async def generate_api(
+        self, caller: str, prompt: str, *, ratio: str | None, model: str, quality: str,
+        reference_loader: Callable[[], Awaitable[bytes]] | None = None,
+    ) -> list[Path]:
+        prompt = self._validate_prompt(prompt, ratio)
+        if self.closing:
+            raise PluginError("插件正在停止，请稍后重试。")
+        if self.api_task is not None:
+            raise PluginError("OpenAI API 正在处理其他任务，请稍后重试。")
+        if self.active_tasks >= self.settings.max_sessions:
+            raise PluginError("当前任务已满，请稍后重试。")
+        settings = self.settings
+        task = asyncio.create_task(self.api.generate(
+            settings, caller, prompt, ratio=ratio, model=model, quality=quality,
+            reference_loader=reference_loader,
+        ))
+        self.api_task = task
+        try:
+            data = await task
+            workspace = self.root / "api_jobs" / uuid4().hex
+            try:
+                return [write_image(data, workspace, settings.max_image_bytes)]
+            except OSError:
+                if workspace.is_dir():
+                    workspace.rmdir()
+                raise
+        except asyncio.CancelledError:
+            if asyncio.current_task().cancelling():
+                raise
+            raise PluginError("API 绘图已取消，已提交的请求可能计费。") from None
+        finally:
+            self.api_task = None
+
+    async def cancel_api(self) -> bool:
+        task = self.api_task
+        if task is None:
+            return False
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        return True
+
+    async def generate(
+        self, key: str, prompt: str,
+        reference_loader: Callable[[], Awaitable[bytes]] | None = None,
+        *, ratio: str | None = None, model: str | None = None,
+    ) -> list[Path]:
+        prompt = self._validate_prompt(prompt, ratio)
         selected_model = self.settings.model if model is None else model
         async with self.session(key) as state:
             account = (await state.rpc.request("account/read", {"refreshToken": False})).get("account")
@@ -358,4 +422,6 @@ class ImageService:
 
     async def close(self):
         self.closing = True
-        await asyncio.gather(*(self.cancel(key) for key in list(self.sessions)), return_exceptions=True)
+        await asyncio.gather(
+            self.cancel_api(), *(self.cancel(key) for key in list(self.sessions)), return_exceptions=True,
+        )

@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from .errors import PluginError
+from .openai_images import api_key
 from .service import Settings, user_key
 
 SHARED_KEY = user_key("__astrbot_codex_dashboard__", "shared")
@@ -29,19 +30,25 @@ class DashboardController:
 
     def state(self):
         return {
-            "version": "0.6.0",
+            "version": "0.7.0",
             "settings": {k: copy.deepcopy(self.plugin.config.get(k, v["default"])) for k, v in SCHEMA.items()},
             "account": dict(self.account),
+            "openai_key_configured": bool(api_key()),
             "quota": copy.deepcopy(self.quota) if self.plugin.account_mode == "shared" else None,
             "login_pending": self.login_pending,
             "busy": SHARED_KEY in self.service.sessions or SHARED_KEY in self.plugin.image_owners,
-            "active_tasks": len(self.service.sessions),
+            "active_tasks": self.service.active_tasks,
         }
 
     async def refresh(self):
         async with self.lock:
             if not self.login_pending and SHARED_KEY not in self.plugin.image_owners:
-                result = await self.service.status(SHARED_KEY)
+                try:
+                    result = await self.service.status(SHARED_KEY)
+                except PluginError as exc:
+                    self.account = {"status": "error", "message": str(exc)}
+                    self.quota = None
+                    return self.state()
                 if not result.get("busy"):
                     self.account = {"status": "logged_in" if result["logged_in"] else "signed_out",
                                     "message": "账号已登录，图像权限以实际绘图结果为准。" if result["logged_in"] else "尚未登录统一账号。"}

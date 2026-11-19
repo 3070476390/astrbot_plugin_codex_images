@@ -31,6 +31,7 @@ class DrawingRequest:
     ratio: str | None
     model: str
     reference: bytes | None
+    quality: str | None = None
 
     @property
     def reference_size(self) -> int:
@@ -69,7 +70,7 @@ class RedrawHistory:
     def get(self, drawing_id, scope) -> DrawingRequest:
         entry = self.records.get(drawing_id)
         if entry is None or entry.scope != scope:
-            raise PluginError("找不到可重绘的记录。请使用当前会话中自己近期出图的重绘编号。")
+            raise PluginError("找不到可重绘的记录。请使用当前会话中自己的近期重绘编号，并切到原出图模式。")
         return entry.drawing
 
     def discard(self, drawing_id):

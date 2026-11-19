@@ -70,6 +70,9 @@ function render(state, resetForm = false) {
     : shared ? count ? `${count} 位用户 + 管理员` : "仅聊天管理员" : count ? `${count} 位指定用户` : "所有独立账号用户";
   $("tasks-summary").textContent = `${state.active_tasks} / ${state.settings.max_sessions}`;
   $("group-summary").textContent = state.settings.allow_group_images ? "已开启" : "未开启";
+  $("openai-key-status").textContent = state.openai_key_configured
+    ? "服务器已配置 API 密钥。"
+    : "服务器尚未配置 API 密钥。";
   renderQuota(state);
   controls();
 }

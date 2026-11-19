@@ -1,5 +1,6 @@
 """Adapter tests with minimal AstrBot doubles; no running bot required."""
 import importlib.util
+import asyncio
 import logging
 import sys
 import tempfile
@@ -30,6 +31,17 @@ class Config(dict):
         self.saved = dict(self)
 
 
+class FakeStar:
+    def __init__(self, context):
+        self.kv = {}
+
+    async def get_kv_data(self, key, default):
+        return self.kv.get(key, default)
+
+    async def put_kv_data(self, key, value):
+        self.kv[key] = value
+
+
 def load_plugin(data_path):
     api = types.ModuleType("astrbot.api")
     api.AstrBotConfig = dict
@@ -38,7 +50,7 @@ def load_plugin(data_path):
     event_module.AstrMessageEvent = object
     event_module.filter = types.SimpleNamespace(command=lambda *a, **k: lambda f: f)
     star = types.ModuleType("astrbot.api.star")
-    star.Star = type("Star", (), {"__init__": lambda self, context: None})
+    star.Star = FakeStar
     star.Context = object
     paths = types.ModuleType("astrbot.core.utils.astrbot_path")
     paths.get_astrbot_data_path = lambda: data_path
@@ -189,6 +201,84 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(received[0], received[2])
         self.assertEqual(received[0][3], {"ratio": "9:16", "model": "original-model"})
         self.assertFalse(list(Path(self.temp.name).glob("job-*")))
+
+    async def test_api_mode_is_opt_in_and_preserves_the_original_backend_on_redraw(self):
+        from codex_images.openai_images import API_KEY_ENV
+
+        self.plugin.service.generate = AsyncMock(return_value=[])
+        self.plugin.service.generate_api = AsyncMock()
+        select_api = Event("codex模式 API")
+        denied = await self._consume(self.plugin.mode_command(select_api))
+        self.assertIn("尚未启用", denied[0])
+        self.plugin.config["openai_api_enabled"] = True
+        with patch.dict("os.environ", {API_KEY_ENV: ""}):
+            missing_key = await self._consume(self.plugin.mode_command(select_api))
+        self.assertIn("尚未配置", missing_key[0])
+        await self._consume(self.plugin.image_command(Event("codex画图 first")))
+        self.plugin.service.generate.assert_awaited_once()
+
+        def output():
+            job = Path(self.temp.name) / "api-result"
+            job.mkdir()
+            image = job / "image.png"
+            image.write_bytes(b"image")
+            return [image]
+
+        with patch.dict("os.environ", {API_KEY_ENV: "test-only-key"}):
+            selected = await self._consume(self.plugin.mode_command(select_api))
+            self.assertIn("API 项目", selected[0])
+            other = await self._consume(self.plugin.mode_command(Event("codex模式", sender="2")))
+            self.assertIn("Codex", other[0])
+            self.plugin.service.generate_api.return_value = output()
+            event = Event("codex画图 --比例 1:1 second")
+            self.assertEqual(await self._consume(self.plugin.image_command(event)), [])
+            drawing_id = event.sent[-1].chain[-1].text.rsplit(" ", 1)[-1]
+            self.assertIn("按量计费", event.sent[0])
+            expected = {"ratio": "1:1", "model": self.plugin.service.settings.openai_image_model, "quality": "medium"}
+            caller = self.plugin._check(event)
+            self.plugin.service.generate_api.assert_awaited_once_with(caller, "second", **expected)
+
+            self.plugin.config["openai_api_enabled"] = False
+            blocked = await self._consume(self.plugin.image_command(Event("codex画图 blocked")))
+            self.assertIn("尚未启用", blocked[0])
+            await self._consume(self.plugin.mode_command(Event("codex模式 Codex")))
+            redraw = Event(f"codex重绘 {drawing_id}")
+            wrong_mode = await self._consume(self.plugin.redraw_command(redraw))
+            self.assertIn("原出图模式", wrong_mode[0])
+            self.plugin.service.generate.assert_awaited_once()
+            self.plugin.service.generate_api.assert_awaited_once()
+
+            self.plugin.config["openai_api_enabled"] = True
+            await self._consume(self.plugin.mode_command(select_api))
+            self.plugin.service.settings.openai_image_quality = "high"
+            self.plugin.service.generate_api.return_value = output()
+            self.assertEqual(await self._consume(self.plugin.redraw_command(redraw)), [])
+            self.plugin.service.generate_api.assert_awaited_with(caller, "second", **expected)
+
+    async def test_api_cancellation_is_limited_to_the_request_owner(self):
+        from codex_images.openai_images import API_KEY_ENV
+
+        self.plugin.config.update(openai_api_enabled=True, account_mode="shared", allow_all_users=True)
+        started = asyncio.Event()
+
+        async def generate(*args, **kwargs):
+            started.set()
+            await asyncio.Event().wait()
+
+        self.plugin.service.api.generate = generate
+        with patch.dict("os.environ", {API_KEY_ENV: "test-only-key"}):
+            await self._consume(self.plugin.mode_command(Event("codex模式 API")))
+            request = asyncio.create_task(self._consume(self.plugin.image_command(Event("codex画图 cat"))))
+            await asyncio.wait_for(started.wait(), 1)
+            self.assertEqual(self.plugin.dashboard.state()["active_tasks"], 1)
+            denied = await self._consume(self.plugin.cancel_command(Event("codex取消", sender="2")))
+            self.assertIn("没有", denied[0])
+            self.assertFalse(request.done())
+            await self._consume(self.plugin.mode_command(Event("codex模式 Codex")))
+            self.assertIn("停止", (await self._consume(self.plugin.cancel_command(Event("codex取消"))))[0])
+            self.assertIn("取消", (await asyncio.wait_for(request, 1))[0])
+            self.assertFalse(self.plugin.image_owners)
+            self.assertEqual(self.plugin.dashboard.state()["active_tasks"], 0)
 
     async def test_missing_identity_is_rejected(self):
         results = [r async for r in self.plugin.status_command(Event(sender=None))]

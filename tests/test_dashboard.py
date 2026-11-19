@@ -28,6 +28,22 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state["settings"]["allowed_users"], ["qq:1"])
         self.assertTrue(self.plugin.config.saved["allow_group_images"])
 
+    async def test_api_settings_and_secret_presence(self):
+        from codex_images.openai_images import API_KEY_ENV
+
+        with patch.dict("os.environ", {API_KEY_ENV: "test-only-key"}):
+            state = await self.controller.save_settings({
+                "openai_api_enabled": True, "openai_image_model": "gpt-image-2", "openai_image_quality": "low",
+            })
+            self.assertTrue(state["openai_key_configured"])
+            self.assertTrue(state["settings"]["openai_api_enabled"])
+            self.assertEqual(self.plugin.service.settings.openai_image_model, "gpt-image-2")
+            self.assertEqual(self.plugin.service.settings.openai_image_quality, "low")
+            self.assertNotIn("test-only-key", str(state))
+        with self.assertRaisesRegex(Exception, "模型 ID"):
+            await self.controller.save_settings({"openai_image_model": "sk-secret"})
+        self.assertEqual(self.plugin.service.settings.openai_image_model, "gpt-image-2")
+
     async def test_invalid_settings_are_atomic(self):
         original = dict(self.plugin.config)
         for payload in [[], {"token": "secret"}, {"allow_group_images": "false"}, {"account_mode": "anything"},
