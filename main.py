@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 from uuid import uuid4
 
@@ -11,6 +12,7 @@ from .codex_images.errors import PluginError
 from .codex_images.service import ImageService, Settings, user_key
 from .codex_images.dashboard import DashboardController, SHARED_KEY
 from .codex_images.drawing import DRAWING_ID, DrawingRequest, RedrawHistory, parse_drawing_prompt
+from .codex_images.gallery import Gallery
 from .codex_images.message_images import load_reference, quoted_drawing_id, reference_from_message
 from .codex_images.openai_images import API_JOB_KEY, api_key
 from .codex_images.quota import format_quota
@@ -26,12 +28,27 @@ class CodexImagesPlugin(Star):
         self._plugin_context = context
         root = Path(get_astrbot_data_path()) / "plugin_data" / "astrbot_plugin_codex_images"
         self.service = ImageService(root, Settings.from_config(config))
+        self.gallery = Gallery(root / "gallery")
+        self.gallery_cleanup_task = None
         self.dashboard = DashboardController(self)
 
     async def initialize(self):
         from .codex_images.web_api import DashboardAPI
         self.web_api = DashboardAPI(self._plugin_context, self.dashboard)
         self.web_api.register()
+        self.gallery_cleanup_task = asyncio.create_task(self._prune_gallery_periodically())
+
+    async def _prune_gallery_periodically(self):
+        while True:
+            try:
+                await asyncio.to_thread(self.gallery.prune)
+            except Exception as exc:
+                logger.warning("图库清理失败 (%s)", type(exc).__name__)
+            await asyncio.sleep(300)
+
+    @property
+    def gallery_enabled(self):
+        return self.config.get("gallery_enabled", True) is True
 
     @property
     def account_mode(self):
@@ -83,6 +100,7 @@ class CodexImagesPlugin(Star):
             if self.account_mode == "shared" else
             "/codex登录：私聊获取官方设备码并登录\n/codex退出：退出自己的账号\n"
         )
+        gallery_help = "\n新出图会在后台图库暂存最多 7 天，供 AstrBot 后台管理员浏览。" if self.gallery_enabled else ""
         yield event.plain_result(
             "Codex 绘图\n" + account_help +
             "/codex模式 [Codex|API]：查询或切换自己的绘图模式\n"
@@ -93,7 +111,7 @@ class CodexImagesPlugin(Star):
             "/codex模型 [页码]：查看当前模式的模型\n"
             "/codex额度：查看当前模式的用量查询方式\n"
             "/codex取消：停止当前登录或绘图任务\n"
-            "是否能生成图片取决于账号权限和可用额度。"
+            "是否能生成图片取决于账号权限和可用额度。" + gallery_help
         )
 
     @filter.command("codex模式")
@@ -323,7 +341,8 @@ class CodexImagesPlugin(Star):
             self.image_owners[key] = caller
             reserved_key = key
             prefix = "OpenAI API（按量计费）" if use_api else ""
-            await event.send(event.plain_result(f"{prefix}正在生成图片，请稍候。可发送 /codex取消 停止任务。"))
+            gallery_note = "生成结果将暂存到后台图库。" if self.gallery_enabled else ""
+            await event.send(event.plain_result(f"{prefix}正在生成图片，请稍候。可发送 /codex取消 停止任务。{gallery_note}"))
             if key in self.cancelled_images:
                 raise PluginError("任务已取消。")
             options = {}
@@ -349,6 +368,16 @@ class CodexImagesPlugin(Star):
             if key in self.cancelled_images:
                 raise PluginError("任务已取消。")
             for path in paths:
+                if self.gallery_enabled:
+                    try:
+                        await asyncio.to_thread(
+                            self.gallery.save, path, backend="api" if use_api else "codex",
+                            model=model, prompt=prompt, max_image_bytes=self.service.settings.max_image_bytes,
+                        )
+                    except Exception as exc:
+                        logger.warning("生成图片未能存入图库 (%s)", type(exc).__name__)
+                if key in self.cancelled_images:
+                    raise PluginError("任务已取消。")
                 # Await delivery before deleting the temporary output.
                 result = event.image_result(str(path))
                 label = "OpenAI API · " if use_api else ""
@@ -375,6 +404,9 @@ class CodexImagesPlugin(Star):
                     pass
 
     async def terminate(self):
+        if self.gallery_cleanup_task is not None:
+            self.gallery_cleanup_task.cancel()
+            await asyncio.gather(self.gallery_cleanup_task, return_exceptions=True)
         await self.dashboard.close()
         await self.service.close()
         self.redraw_history.clear()

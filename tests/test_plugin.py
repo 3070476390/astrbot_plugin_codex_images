@@ -9,6 +9,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+from PIL import Image as PILImage
+
 
 class Image:
     def __init__(self, file="base64://fixture", url=""):
@@ -133,13 +135,32 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
         job = Path(self.temp.name) / "image-job"
         job.mkdir()
         image = job / "image.png"
-        image.write_bytes(b"image")
+        with PILImage.new("RGB", (12, 8), "blue") as output:
+            output.save(image)
         self.plugin.service.generate = AsyncMock(return_value=[image])
         event = Event("codex画图 a cat  with spaces\nand lines")
         self.assertEqual([r async for r in self.plugin.image_command(event)], [])
         self.assertEqual(self.plugin.service.generate.call_args.args[1], "a cat  with spaces\nand lines")
         self.assertIsInstance(event.sent[-1].chain[0], Image)
         self.assertFalse(image.exists())
+        item, = self.plugin.gallery.list(1, "codex", "cat")["items"]
+        self.assertEqual(item["prompt"], "a cat  with spaces\nand lines")
+
+    async def test_gallery_failure_or_opt_out_keeps_image_delivery_working(self):
+        for enabled in (True, False):
+            self.plugin.config["gallery_enabled"] = enabled
+            job = Path(self.temp.name) / "gallery-error-job"
+            job.mkdir()
+            image = job / "image.png"
+            image.write_bytes(b"mock image")
+            self.plugin.service.generate = AsyncMock(return_value=[image])
+            event = Event("codex画图 gallery")
+            with patch.object(self.plugin.gallery, "save", side_effect=OSError("disk error")) as save:
+                with self.assertLogs("test", level="WARNING") if enabled else self.assertNoLogs("test"):
+                    self.assertEqual(await self._consume(self.plugin.image_command(event)), [])
+                self.assertEqual(save.called, enabled)
+            self.assertIsInstance(event.sent[-1].chain[0], Image)
+            self.assertFalse(image.exists())
 
     async def test_missing_prompt_does_not_start_generation(self):
         self.plugin.service.generate = AsyncMock()
@@ -170,7 +191,8 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
             job = Path(self.temp.name) / f"job-{len(received)}"
             job.mkdir()
             output = job / "image.png"
-            output.write_bytes(b"image")
+            with PILImage.new("RGB", (12, 8), "blue") as image:
+                image.save(output)
             return [output]
 
         self.plugin.service.generate = AsyncMock(side_effect=generate)
@@ -221,7 +243,8 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
             job = Path(self.temp.name) / "api-result"
             job.mkdir()
             image = job / "image.png"
-            image.write_bytes(b"image")
+            with PILImage.new("RGB", (12, 8), "blue") as generated:
+                generated.save(image)
             return [image]
 
         with patch.dict("os.environ", {API_KEY_ENV: "test-only-key"}):
@@ -254,6 +277,7 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
             self.plugin.service.generate_api.return_value = output()
             self.assertEqual(await self._consume(self.plugin.redraw_command(redraw)), [])
             self.plugin.service.generate_api.assert_awaited_with(caller, "second", **expected)
+            self.assertEqual(self.plugin.gallery.list(1, "api", "second")["total"], 2)
 
     async def test_api_cancellation_is_limited_to_the_request_owner(self):
         from codex_images.openai_images import API_KEY_ENV

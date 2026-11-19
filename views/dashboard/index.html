@@ -8,13 +8,16 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand"><span class="brand-icon" aria-hidden="true">✦</span><div><h1>Codex 绘图</h1><p>账号与绘图设置</p></div><span class="version">v0.7.0</span></div>
+    <div class="brand"><span class="brand-icon" aria-hidden="true">✦</span><div><h1>Codex 绘图</h1><p>绘图设置与图库</p></div><span class="version">v0.8.0</span></div>
     <div class="connection"><span id="connection-dot" class="dot"></span><span id="connection-text">正在连接插件…</span></div>
   </header>
   <main>
     <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
-    <div class="intro"><div><span class="eyebrow">CODEX IMAGE STUDIO</span><h2>让创意，从一句话开始。</h2><p>在这里连接绘图账号，设置谁可以使用，以及如何生成图片。</p></div><span class="intro-mark" aria-hidden="true">✧</span></div>
-    <div class="workspace">
+    <nav class="dashboard-nav" aria-label="绘图控制台">
+      <button id="open-workspace" type="button" aria-controls="workspace" aria-pressed="true">绘图设置</button>
+      <button id="open-gallery" type="button" aria-controls="gallery" aria-pressed="false" disabled>图库</button>
+    </nav>
+    <div id="workspace" class="workspace">
       <aside>
         <section class="card account-card" aria-labelledby="account-title">
           <div class="card-heading"><h3 id="account-title">账号认证</h3><span class="tag">订阅登录</span></div>
@@ -54,6 +57,7 @@
               <label class="toggle-row all-users-toggle" for="allow_all_users"><span><strong>允许所有用户使用</strong><small>开启后无需逐个添加用户。统一账号模式下，所有调用共用该账号的订阅额度。</small></span><input id="allow_all_users" name="allow_all_users" type="checkbox" role="switch"></label>
               <div class="field"><div class="label-line"><label for="allowed_users">允许使用的用户</label><span>每行一项</span></div><textarea id="allowed_users" name="allowed_users" rows="4" placeholder="qq_bot:123456789&#10;telegram_bot:987654321" spellcheck="false"></textarea><p id="allowlist-hint" class="hint">格式：平台实例ID:用户ID，用 /sid 的 Bot ID 和 UID 拼接。未开启所有用户时，统一模式名单为空仅管理员可用。</p></div>
               <label class="toggle-row" for="allow_group_images"><span><strong>允许群聊绘图</strong><small>生成的图片将直接发送到发起请求的群聊。</small></span><input id="allow_group_images" name="allow_group_images" type="checkbox" role="switch"></label>
+              <label class="toggle-row gallery-toggle" for="gallery_enabled"><span><strong>将新出图存入临时图库</strong><small>图片和提示词最多保留 7 天，供 AstrBot 后台管理员浏览。</small></span><input id="gallery_enabled" name="gallery_enabled" type="checkbox" role="switch"></label>
               <div class="divider"></div>
               <div class="section-label"><span>02</span><h4>生成与连接</h4></div>
               <div class="field"><label for="codex_command">Codex 可执行文件</label><input id="codex_command" name="codex_command" placeholder="codex" required maxlength="2048" spellcheck="false"><p class="hint">填写 AstrBot 所在机器或容器内的路径。Windows 请填写原生 codex.exe 的完整路径。</p></div>
@@ -83,6 +87,43 @@
         <section class="quick-start"><div class="quick-icon" aria-hidden="true">✎</div><div><h3>连接完成，去聊天里试一试</h3><p>文生图：/codex画图 图片描述<br>图生图：附带或引用一张图片，发送 /codex改图 修改要求<br>模型列表：/codex模型，可带页码。<br>账号额度：/codex额度，查看用量与重置时间。</p><code>/codex改图 保留主体，把背景改成雪山</code></div><span class="tag subtle">文生图 · 图生图</span></section>
       </div>
     </div>
+    <section id="gallery" class="card gallery" aria-labelledby="gallery-title" hidden>
+      <header class="gallery-heading">
+        <div>
+          <h2 id="gallery-title">临时图库</h2>
+          <p class="muted">出图最多保留 7 天，最近生成的图片排在前面。</p>
+        </div>
+        <button id="gallery-refresh" type="button">刷新</button>
+      </header>
+      <div class="gallery-filters">
+        <input id="gallery-search" type="search" aria-label="搜索图库" placeholder="搜索提示词或模型" maxlength="200">
+        <select id="gallery-backend" aria-label="绘图模式">
+          <option value="">全部模式</option>
+          <option value="codex">Codex 订阅</option>
+          <option value="api">OpenAI API</option>
+        </select>
+      </div>
+      <p id="gallery-status" class="muted gallery-status" role="status"></p>
+      <div id="gallery-grid" class="gallery-grid"></div>
+      <nav id="gallery-pages" class="gallery-pages" aria-label="图库分页" hidden>
+        <button id="gallery-prev" type="button">上一页</button>
+        <span id="gallery-page-number"></span>
+        <button id="gallery-next" type="button">下一页</button>
+      </nav>
+    </section>
+    <dialog id="gallery-dialog" aria-labelledby="gallery-preview-title">
+      <div class="gallery-dialog-heading">
+        <h3 id="gallery-preview-title">图片预览</h3>
+        <form method="dialog"><button type="submit">关闭</button></form>
+      </div>
+      <img id="gallery-preview-image" alt="生成的图片">
+      <div class="gallery-dialog-details">
+        <p id="gallery-preview-meta" class="muted"></p>
+        <p id="gallery-preview-prompt"></p>
+        <p id="gallery-preview-status" class="muted" role="status"></p>
+        <button id="gallery-download" type="button">下载原图</button>
+      </div>
+    </dialog>
     <footer class="page-footer">Codex 绘图 · AstrBot 扩展功能 <span>账号由管理员管理，创意由你开始。</span></footer>
   </main>
   <script type="module" src="./app.js"></script>

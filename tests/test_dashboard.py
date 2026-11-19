@@ -178,6 +178,7 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
         web.request = request
         web.json_response = lambda data, **kwargs: (200, data)
         web.error_response = lambda message, **kwargs: (kwargs.get("status_code", 400), message)
+        web.stream_response = lambda data, **kwargs: (200, b"".join(data), kwargs["headers"])
         api = types.ModuleType("astrbot.api")
         api.logger = types.SimpleNamespace(error=lambda *args: None)
         source = Path(__file__).resolve().parents[1] / "codex_images" / "web_api.py"
@@ -190,10 +191,10 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
                                         register_web_api=lambda *args: routes.append(args))
         endpoint = module.DashboardAPI(context, self.controller)
         endpoint.register()
-        self.assertEqual(len(routes), 7)
+        self.assertEqual(len(routes), 10)
         for username in [None, "another-user", "api_key:123"]:
             request.username = username
-            for handler in [endpoint.state, endpoint.refresh, endpoint.login, endpoint.logout, endpoint.cancel, endpoint.settings, endpoint.quota]:
+            for _, handler, _, _ in routes:
                 result = await handler()
                 self.assertEqual(result[0], 403)
         request.json.assert_not_awaited()
@@ -201,3 +202,21 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await endpoint.state())[0], 200)
         self.assertEqual((await endpoint.settings())[0], 200)
         self.assertEqual(self.plugin.service.settings.model, "test")
+        from PIL import Image
+
+        path = Path(self.temp.name) / "generated.png"
+        with Image.new("RGB", (32, 32), "blue") as image:
+            image.save(path)
+        self.plugin.gallery.save(path, backend="api", model="gpt-image-2", prompt="蓝色", max_image_bytes=4096)
+        request.query = types.SimpleNamespace(get=lambda key, default="", **kwargs: default)
+        listing = (await endpoint.gallery())[1]
+        self.assertEqual(listing["total"], 1)
+        item_id = listing["items"][0]["id"]
+        request.query = {"id": item_id}
+        self.assertTrue((await endpoint.gallery_preview())[1]["image"])
+        status, data, headers = await endpoint.gallery_download()
+        self.assertEqual(status, 200)
+        self.assertEqual(data, path.read_bytes())
+        self.assertEqual(headers["Cache-Control"], "no-store")
+        request.query = {"id": "../auth.json"}
+        self.assertEqual((await endpoint.gallery_download())[0], 400)

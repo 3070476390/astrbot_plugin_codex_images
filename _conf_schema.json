@@ -5,6 +5,7 @@
   "openai_api_enabled": {"description": "允许切换到 OpenAI API 绘图", "type": "bool", "default": false, "hint": "用量计入服务器配置的 OpenAI API 项目。密钥从 AstrBot 进程的 ASTRBOT_CODEX_IMAGES_OPENAI_API_KEY 环境变量读取。"},
   "openai_image_model": {"description": "OpenAI 图像模型", "type": "string", "default": "gpt-image-2.6-flare", "hint": "填写当前 API 项目可用的 GPT Image 模型 ID。"},
   "openai_image_quality": {"description": "OpenAI API 出图质量", "type": "string", "default": "medium", "options": ["low", "medium", "high"], "labels": ["低", "中", "高"], "hint": "质量和尺寸影响 API 用量。"},
+  "gallery_enabled": {"description": "将新出图存入临时图库", "type": "bool", "default": true, "hint": "生成结果和提示词最多保留 7 天，仅 AstrBot 后台管理员可浏览。"},
   "allow_group_images": {"description": "允许群聊绘图", "type": "bool", "default": false, "hint": "开启后图片会发到请求所在群聊；账号操作仍仅限私聊。"},
   "allow_all_users": {"description": "允许所有用户使用", "type": "bool", "default": false, "hint": "开启后无需填写使用名单，所有能向机器人发送指令的用户都可使用。统一模式共用管理员账号的订阅额度；群聊仍需开启“允许群聊绘图”。"},
   "allowed_users": {"description": "允许使用的用户", "type": "list", "default": [], "hint": "开启“允许所有用户使用”时忽略此名单，关闭后恢复生效。格式为 平台实例ID:用户ID，可通过 /sid 的 Bot ID 和 UID 拼接。统一模式留空仅允许聊天管理员；独立模式留空允许所有用户使用自己的账号。"},

@@ -30,7 +30,7 @@ class DashboardController:
 
     def state(self):
         return {
-            "version": "0.7.0",
+            "version": "0.8.0",
             "settings": {k: copy.deepcopy(self.plugin.config.get(k, v["default"])) for k, v in SCHEMA.items()},
             "account": dict(self.account),
             "openai_key_configured": bool(api_key()),

@@ -3,6 +3,7 @@ __pycache__/
 .venv/
 .dev/
 dist/
+downloads/
 .pytest_cache/
 .ruff_cache/
 auth.json

@@ -15,11 +15,18 @@ const settings = Object.fromEntries(Object.entries(schema).map(([key, value]) =>
     page.on('pageerror', error => errors.push(error.message));
     await page.route('http://127.0.0.1:9911/**', async route => {
       const name = new URL(route.request().url()).pathname.split('/').pop() || 'index.html';
-      if (!['index.html', 'app.js', 'style.css'].includes(name)) return route.abort();
+      if (!['index.html', 'app.js', 'gallery.js', 'style.css'].includes(name)) return route.abort();
       await route.fulfill({ path: path.join(root, 'views/dashboard', name), contentType: name.endsWith('.js') ? 'text/javascript' : name.endsWith('.css') ? 'text/css' : 'text/html' });
     });
     await page.addInitScript(settings => {
-      let state = {version: '0.7.0', settings, account: {status: 'signed_out', message: '尚未登录统一账号。'}, openai_key_configured: true, quota: null, login_pending: false, busy: false, active_tasks: 0};
+      let state = {version: '0.8.0', settings, account: {status: 'signed_out', message: '尚未登录统一账号。'}, openai_key_configured: true, quota: null, login_pending: false, busy: false, active_tasks: 0};
+      const thumbnail = 'UklGRjYAAABXRUJQVlA4ICoAAACQAQCdASoIAAYAAUAmJaACdLoAA5gA/tom/xbSOhU6v/jeOtvrb2UAAAA=';
+      const gallery = Array.from({length: 13}, (_, index) => ({
+        id: index.toString(16).padStart(32, '0'), created: 1793700000 - index * 5,
+        backend: index === 0 ? 'api' : 'codex', model: index === 0 ? 'gpt-image-2' : 'Codex',
+        prompt: index === 0 ? '窗边的橘猫' : `湖边风景 ${index}`,
+        width: 8, height: 6, thumbnail,
+      }));
       window.quotaMode = 'ready';
       window.quotaCalls = 0;
       window.setBusy = value => {state.busy = value;};
@@ -27,7 +34,16 @@ const settings = Object.fromEntries(Object.entries(schema).map(([key, value]) =>
       window.finishLogin = () => {state.account = {status: 'logged_in', message: '统一账号登录成功，可以向机器人发送绘图指令。'};state.login_pending = false;};
       window.AstrBotPluginView = {
         ready: async () => ({}),
-        apiGet: async () => structuredClone(state),
+        apiGet: async (endpoint, params) => {
+          if (endpoint === 'dashboard/gallery') {
+            const items = gallery.filter(item => (!params.backend || item.backend === params.backend) && item.prompt.includes(params.q));
+            const page = Math.min(params.page, Math.max(1, Math.ceil(items.length / 12)));
+            return {items: items.slice((page - 1) * 12, page * 12), page, pages: Math.max(1, Math.ceil(items.length / 12)), total: items.length, enabled: state.settings.gallery_enabled};
+          }
+          if (endpoint === 'dashboard/gallery-preview') return {image: thumbnail};
+          return structuredClone(state);
+        },
+        download: async (endpoint, params) => {window.downloaded = {endpoint, id: params.id};},
         apiPost: async (endpoint, body) => {
           if (endpoint.endsWith('/settings')) {
             if (window.rejectSave) throw new Error('模拟保存失败，请重试');
@@ -62,6 +78,7 @@ const settings = Object.fromEntries(Object.entries(schema).map(([key, value]) =>
     assert.equal(await page.locator('#users-summary').innerText(), '仅聊天管理员');
     assert.equal(await page.locator('#refresh-quota').isDisabled(), true);
     assert.equal(await page.locator('#openai_api_enabled').isChecked(), false);
+    assert.equal(await page.locator('#gallery_enabled').isChecked(), true);
     assert.equal(await page.locator('#openai-key-status').innerText(), '服务器已配置 API 密钥。');
     await page.locator('#openai_api_enabled').check();
     await page.locator('#openai_image_model').fill('gpt-image-2');
@@ -152,8 +169,32 @@ const settings = Object.fromEntries(Object.entries(schema).map(([key, value]) =>
     await page.locator('#logout').click();
     await page.getByText('统一账号已退出。').first().waitFor();
     assert.equal(await page.locator('progress').count(), 0);
+    await page.setViewportSize({ width: 1440, height: 1200 });
+    await page.getByRole('button', {name: '图库', exact: true}).click();
+    await page.getByText('共 13 张', {exact: true}).waitFor();
+    assert.equal(await page.locator('.gallery-item').count(), 12);
+    await page.waitForFunction(() => document.querySelector('.gallery-item img').naturalWidth === 8);
+    await page.screenshot({ path: path.join(root, 'dist/gallery-preview.png'), fullPage: true });
+    await page.getByRole('button', {name: '下一页', exact: true}).click();
+    await page.getByText('第 2 / 2 页', {exact: true}).waitFor();
+    assert.equal(await page.locator('.gallery-item').count(), 1);
+    await page.locator('#gallery-backend').selectOption('api');
+    await page.getByText('共 1 张', {exact: true}).waitFor();
+    await page.locator('#gallery-search').fill('不存在');
+    await page.getByText('没有符合条件的图片。', {exact: true}).waitFor();
+    await page.locator('#gallery-search').fill('橘猫');
+    await page.getByRole('button', {name: /窗边的橘猫/}).click();
+    await page.getByRole('dialog').waitFor();
+    await page.waitForFunction(() => document.querySelector('#gallery-preview-image').naturalWidth === 8);
+    await page.getByRole('button', {name: '下载原图', exact: true}).click();
+    assert.deepEqual(await page.evaluate(() => window.downloaded), {endpoint: 'dashboard/gallery-download', id: '0'.repeat(32)});
+    await page.getByRole('button', {name: '关闭', exact: true}).click();
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'mobile gallery overflow');
+    await page.getByRole('button', {name: '绘图设置', exact: true}).click();
+    await page.locator('#settings-form').waitFor();
     assert.deepEqual(errors, []);
-    console.log('PASS: all-users switch/save/reset, allowlist restoration, account/settings flow, quota states, busy/personal restrictions, logout cleanup, mobile layout and themes');
+    console.log('PASS: settings, account, quota, gallery filters, pagination, preview and download, responsive layout');
   } finally {
     await browser.close();
   }

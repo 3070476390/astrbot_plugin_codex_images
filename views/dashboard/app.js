@@ -1,3 +1,5 @@
+import { initGallery } from "./gallery.js";
+
 const $ = (id) => document.getElementById(id);
 const bridge = window.AstrBotPluginView || window.AstrBotPluginPage;
 const numeric = ["max_sessions", "request_timeout", "login_timeout", "generation_timeout", "max_image_mb", "max_prompt_chars"];
@@ -233,6 +235,7 @@ window.addEventListener("pagehide", () => clearTimeout(pollTimer));
 try {
   if (!bridge) throw new Error("请从 AstrBot 的“扩展功能 → Codex 绘图”打开此页面。");
   await bridge.ready();
+  initGallery(bridge);
   const state = await bridge.apiGet("dashboard/state");
   connection(true);
   render(state, true);
