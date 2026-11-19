@@ -14,9 +14,15 @@ class Image:
         self.file, self.url = file, url
 
 
+class Plain:
+    def __init__(self, text):
+        self.text = text
+
+
 class Reply:
-    def __init__(self, chain=None):
+    def __init__(self, chain=None, message_str=None):
         self.chain = chain
+        self.message_str = message_str
 
 
 class Config(dict):
@@ -37,7 +43,7 @@ def load_plugin(data_path):
     paths = types.ModuleType("astrbot.core.utils.astrbot_path")
     paths.get_astrbot_data_path = lambda: data_path
     components = types.ModuleType("astrbot.api.message_components")
-    components.Image, components.Reply = Image, Reply
+    components.Image, components.Plain, components.Reply = Image, Plain, Reply
     root = Path(__file__).resolve().parents[1]
     package = types.ModuleType("plugin_under_test")
     package.__path__ = [str(root)]
@@ -48,6 +54,7 @@ def load_plugin(data_path):
     with patch.dict(sys.modules, modules):
         spec = importlib.util.spec_from_file_location("plugin_under_test.main", root / "main.py")
         module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
         spec.loader.exec_module(module)
         plugin_modules = {key: value for key, value in sys.modules.items() if key.startswith("plugin_under_test")}
     sys.modules.update(plugin_modules)
@@ -55,10 +62,11 @@ def load_plugin(data_path):
 
 
 class Event:
-    def __init__(self, text="", private=True, sender="1", platform="qq", messages=None):
+    def __init__(self, text="", private=True, sender="1", platform="qq", messages=None, group="group"):
         self.text, self.private, self.sender, self.platform = text, private, sender, platform
         self.sent = []
         self.messages = messages or []
+        self.unified_msg_origin = f"{platform}:private:{sender}" if private else f"{platform}:group:{group}"
 
     def is_private_chat(self):
         return self.private
@@ -83,7 +91,7 @@ class Event:
 
     def image_result(self, path):
         assert Path(path).exists(), "image deleted before delivery"
-        return ("image", path)
+        return types.SimpleNamespace(chain=[Image(file=path)])
 
     async def send(self, value):
         self.sent.append(value)
@@ -118,7 +126,7 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
         event = Event("codex画图 a cat  with spaces\nand lines")
         self.assertEqual([r async for r in self.plugin.image_command(event)], [])
         self.assertEqual(self.plugin.service.generate.call_args.args[1], "a cat  with spaces\nand lines")
-        self.assertEqual(event.sent[-1][0], "image")
+        self.assertIsInstance(event.sent[-1].chain[0], Image)
         self.assertFalse(image.exists())
 
     async def test_missing_prompt_does_not_start_generation(self):
@@ -126,6 +134,61 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
         results = [r async for r in self.plugin.image_command(Event("codex画图"))]
         self.assertIn("用法", results[0])
         self.plugin.service.generate.assert_not_called()
+
+    async def test_ratio_option_preserves_prompt_and_rejects_invalid_requests(self):
+        self.plugin.service.generate = AsyncMock(return_value=[])
+        for command in ("codex画图 --比例 4:3 cat", "codex画图 --比例", "codex画图 --比例 1:1"):
+            self.assertTrue(await self._consume(self.plugin.image_command(Event(command))))
+        self.plugin.service.generate.assert_not_awaited()
+        event = Event("codex画图 --比例=16：9  a cat\nwith  spaces")
+        await self._consume(self.plugin.image_command(event))
+        self.plugin.service.generate.assert_awaited_once_with(
+            self.plugin._check(event), "a cat\nwith  spaces", ratio="16:9",
+        )
+
+    async def test_redraw_reuses_original_edit_and_is_scoped_to_owner_and_chat(self):
+        self.plugin.config.update(account_mode="shared", allow_all_users=True, allow_group_images=True)
+        self.plugin.service.settings.model = "original-model"
+        reference = Image()
+        original_bytes = b"original reference bytes"
+        received = []
+
+        async def generate(key, prompt, *, reference_loader, **kwargs):
+            received.append((key, prompt, await reference_loader(), kwargs))
+            job = Path(self.temp.name) / f"job-{len(received)}"
+            job.mkdir()
+            output = job / "image.png"
+            output.write_bytes(b"image")
+            return [output]
+
+        self.plugin.service.generate = AsyncMock(side_effect=generate)
+        event = Event("codex改图 --比例 9:16 改成水彩", private=False, messages=[reference])
+        main = sys.modules["plugin_under_test.main"]
+        with patch.object(main, "load_reference", new=AsyncMock(return_value=original_bytes)) as load:
+            self.assertEqual(await self._consume(self.plugin.edit_command(event)), [])
+            label = event.sent[-1].chain[-1].text
+            drawing_id = label.rsplit(" ", 1)[-1]
+            self.plugin.service.settings.model = "updated-model"
+
+            for denied in (
+                Event(f"codex重绘 {drawing_id}", private=False, sender="2"),
+                Event(f"codex重绘 {drawing_id}", private=False, group="another-group"),
+                Event(f"codex重绘 {drawing_id}", private=False, platform="another-bot"),
+            ):
+                self.assertIn("找不到", (await self._consume(self.plugin.redraw_command(denied)))[0])
+            self.plugin.service.generate.assert_awaited_once()
+
+            quoted = Event("codex重绘", private=False, messages=[Reply([Plain(label), Image()])])
+            by_id = Event(f"codex重绘 {drawing_id}", private=False)
+            for retry in (quoted, by_id):
+                self.assertEqual(await self._consume(self.plugin.redraw_command(retry)), [])
+                self.assertEqual(retry.sent[-1].chain[-1].text, label)
+            load.assert_awaited_once()
+        self.assertEqual(len(received), 3)
+        self.assertEqual(received[0], received[1])
+        self.assertEqual(received[0], received[2])
+        self.assertEqual(received[0][3], {"ratio": "9:16", "model": "original-model"})
+        self.assertFalse(list(Path(self.temp.name).glob("job-*")))
 
     async def test_missing_identity_is_rejected(self):
         results = [r async for r in self.plugin.status_command(Event(sender=None))]

@@ -2,8 +2,9 @@
 import asyncio
 from pathlib import Path
 
-from astrbot.api.message_components import Image, Reply
+from astrbot.api.message_components import Image, Plain, Reply
 
+from .drawing import REDRAW_LABEL
 from .errors import PluginError
 from .images import image_suffix
 
@@ -18,6 +19,17 @@ def reference_from_message(event):
     if len(images) > 1:
         raise PluginError("图生图每次支持一张参考图，请只附带或引用一张图片。")
     return images[0] if images else None
+
+
+def quoted_drawing_id(event) -> str | None:
+    drawing_ids = set()
+    for item in event.get_messages():
+        if isinstance(item, Reply):
+            texts = [item.message_str or ""]
+            texts.extend(part.text for part in (item.chain or []) if isinstance(part, Plain))
+            for text in texts:
+                drawing_ids.update(REDRAW_LABEL.findall(text))
+    return next(iter(drawing_ids)) if len(drawing_ids) == 1 else None
 
 
 async def load_reference(image, max_bytes: int, timeout: float) -> bytes:

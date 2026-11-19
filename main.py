@@ -1,14 +1,17 @@
 from pathlib import Path
+from uuid import uuid4
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
+from astrbot.api.message_components import Plain
 from astrbot.api.star import Context, Star
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
 from .codex_images.errors import PluginError
 from .codex_images.service import ImageService, Settings, user_key
 from .codex_images.dashboard import DashboardController, SHARED_KEY
-from .codex_images.message_images import load_reference, reference_from_message
+from .codex_images.drawing import DRAWING_ID, DrawingRequest, RedrawHistory, parse_drawing_prompt
+from .codex_images.message_images import load_reference, quoted_drawing_id, reference_from_message
 from .codex_images.quota import format_quota
 
 
@@ -18,6 +21,7 @@ class CodexImagesPlugin(Star):
         self.config = config
         self.image_owners = {}
         self.cancelled_images = set()
+        self.redraw_history = RedrawHistory()
         self._plugin_context = context
         root = Path(get_astrbot_data_path()) / "plugin_data" / "astrbot_plugin_codex_images"
         self.service = ImageService(root, Settings.from_config(config))
@@ -71,8 +75,9 @@ class CodexImagesPlugin(Star):
         yield event.plain_result(
             "Codex 订阅绘图\n" + account_help +
             "/codex状态：查询登录状态\n"
-            "/codex画图 图片描述：生成一张图片\n"
-            "/codex改图 修改要求 + 一张图：图生图，也可引用带图消息\n"
+            "/codex画图 [--比例 9:16] 图片描述：生成一张图，支持 1:1、9:16、16:9\n"
+            "/codex改图 [--比例 9:16] 修改要求：附带或引用一张图\n"
+            "/codex重绘 [编号]：引用自己的出图结果，或输入重绘编号再生成一张\n"
             "/codex模型 [页码]：查询账号可见的模型及图片输入能力\n"
             "/codex额度：查询账号剩余额度百分比和重置时间\n"
             "/codex取消：停止当前登录或绘图任务\n"
@@ -215,7 +220,13 @@ class CodexImagesPlugin(Star):
         async for result in self._image_command(event, require_reference=True):
             yield result
 
-    async def _image_command(self, event, require_reference=False):
+    @filter.command("codex重绘")
+    async def redraw_command(self, event: AstrMessageEvent):
+        """按自己此前的绘图要求再生成一张。"""
+        async for result in self._image_command(event, redraw=True):
+            yield result
+
+    async def _image_command(self, event, require_reference=False, redraw=False):
         paths = []
         reserved_key = None
         try:
@@ -224,12 +235,24 @@ class CodexImagesPlugin(Star):
             # Parse the original message to preserve whitespace/newlines in prompts.
             # AstrBot strips the wake prefix before dispatching commands.
             parts = event.get_message_str().strip().split(maxsplit=1)
-            prompt = parts[1] if len(parts) == 2 else ""
-            if not prompt:
-                raise PluginError("用法：/codex改图 修改要求，并附带或引用一张图片" if require_reference else "用法：/codex画图 雨中的猫咪，水彩风格")
-            reference = reference_from_message(event)
-            if require_reference and reference is None:
-                raise PluginError("没有找到参考图，请将图片与 /codex改图 修改要求 一起发送，或引用一条带图消息。")
+            arguments = parts[1] if len(parts) == 2 else ""
+            scope = (event.unified_msg_origin, caller, key)
+            reference = reference_data = None
+            if redraw:
+                drawing_id = arguments or quoted_drawing_id(event)
+                if not drawing_id or not DRAWING_ID.fullmatch(drawing_id):
+                    raise PluginError("请引用带重绘编号的出图结果发送 /codex重绘，或直接发送 /codex重绘 编号。")
+                drawing = self.redraw_history.get(drawing_id, scope)
+                prompt, ratio, model, reference_data = drawing.prompt, drawing.ratio, drawing.model, drawing.reference
+            else:
+                prompt, ratio = parse_drawing_prompt(arguments)
+                if not prompt:
+                    raise PluginError("用法：/codex改图 修改要求，并附带或引用一张图片" if require_reference else "用法：/codex画图 雨中的猫咪，水彩风格")
+                reference = reference_from_message(event)
+                if require_reference and reference is None:
+                    raise PluginError("没有找到参考图，请将图片与 /codex改图 修改要求 一起发送，或引用一条带图消息。")
+                drawing_id = uuid4().hex[:12]
+                model = self.service.settings.model
             if key in self.image_owners or (key == SHARED_KEY and self.dashboard.login_pending):
                 raise PluginError("绘图账号正在处理其他任务，请稍后重试。")
             self.image_owners[key] = caller
@@ -237,15 +260,30 @@ class CodexImagesPlugin(Star):
             await event.send(event.plain_result("正在生成图片，请稍候。可发送 /codex取消 停止任务。"))
             if key in self.cancelled_images:
                 raise PluginError("任务已取消。")
-            if reference is None:
-                paths = await self.service.generate(key, prompt)
-            else:
+            options = {}
+            if ratio is not None:
+                options["ratio"] = ratio
+            if redraw or model:
+                options["model"] = model
+            if reference is not None or reference_data is not None:
                 async def loader():
-                    return await load_reference(reference, self.service.settings.max_image_bytes, self.service.settings.request_timeout)
-                paths = await self.service.generate(key, prompt, reference_loader=loader)
+                    nonlocal reference_data
+                    if reference_data is None:
+                        reference_data = await load_reference(
+                            reference, self.service.settings.max_image_bytes, self.service.settings.request_timeout,
+                        )
+                    return reference_data
+                options["reference_loader"] = loader
+            paths = await self.service.generate(key, prompt, **options)
+            if key in self.cancelled_images:
+                raise PluginError("任务已取消。")
             for path in paths:
                 # Await delivery before deleting the temporary output.
-                await event.send(event.image_result(str(path)))
+                result = event.image_result(str(path))
+                result.chain.append(Plain(f"再次生成 /codex重绘 {drawing_id}"))
+                await event.send(result)
+            if paths and not self.service.closing:
+                self.redraw_history.remember(drawing_id, scope, DrawingRequest(prompt, ratio, model, reference_data))
         except PluginError as exc:
             yield event.plain_result(str(exc))
         except Exception as exc:
@@ -265,3 +303,4 @@ class CodexImagesPlugin(Star):
     async def terminate(self):
         await self.dashboard.close()
         await self.service.close()
+        self.redraw_history.clear()

@@ -8,8 +8,9 @@ from urllib.parse import urlparse
 from uuid import uuid4
 from collections.abc import Awaitable, Callable
 
+from .drawing import RATIOS, RATIO_HELP
 from .errors import PluginError, RpcError
-from .images import image_suffix, save_image
+from .images import crop_to_ratio, image_suffix, save_image
 from .quota import normalize_quota
 from .rpc import AppServer
 
@@ -267,12 +268,19 @@ class ImageService:
             cancellation.cancel()
             await asyncio.gather(loading, cancellation, return_exceptions=True)
 
-    async def generate(self, key: str, prompt: str, reference_loader: Callable[[], Awaitable[bytes]] | None = None) -> list[Path]:
+    async def generate(
+        self, key: str, prompt: str,
+        reference_loader: Callable[[], Awaitable[bytes]] | None = None,
+        *, ratio: str | None = None, model: str | None = None,
+    ) -> list[Path]:
         prompt = prompt.strip()
         if not prompt:
             raise PluginError("请输入图片描述，例如：/codex画图 雨中的猫咪，水彩风格")
         if len(prompt) > self.settings.max_prompt_chars:
             raise PluginError(f"图片描述不能超过 {self.settings.max_prompt_chars} 个字符。")
+        if ratio is not None and ratio not in RATIOS:
+            raise PluginError(RATIO_HELP)
+        selected_model = self.settings.model if model is None else model
         async with self.session(key) as state:
             account = (await state.rpc.request("account/read", {"refreshToken": False})).get("account")
             if not account or account.get("type") != "chatgpt":
@@ -282,6 +290,9 @@ class ImageService:
             reference_path = None
             try:
                 async with asyncio.timeout(self.settings.generation_timeout):
+                    instructions = INSTRUCTIONS
+                    if ratio is not None:
+                        instructions += f"Compose the output for an exact width-to-height ratio of {ratio}.\n"
                     inputs = [{"type": "text", "text": "Generate one image using the built-in image generation tool. Visual description:\n" + prompt}]
                     if reference_loader is not None:
                         data = await self._reference_bytes(state, reference_loader)
@@ -292,11 +303,11 @@ class ImageService:
                         inputs.append({"type": "localImage", "path": str(reference_path)})
                     params = {
                         "cwd": str(state.workspace), "approvalPolicy": "never",
-                        "sandbox": "read-only", "baseInstructions": INSTRUCTIONS,
+                        "sandbox": "read-only", "baseInstructions": instructions,
                         "ephemeral": True,
                     }
-                    if self.settings.model:
-                        params["model"] = self.settings.model
+                    if selected_model:
+                        params["model"] = selected_model
                     thread = await state.rpc.request("thread/start", params)
                     thread_id = thread["thread"]["id"]
                     result = await state.rpc.request("turn/start", {
@@ -322,8 +333,18 @@ class ImageService:
                             if p["turn"].get("status") != "completed":
                                 raise PluginError("Codex 绘图任务失败或被中断，请检查账号用量、网络或模型设置。")
                             break
-                if not paths:
-                    raise PluginError("本次没有收到图片。请确认 Codex CLI 和账号支持内置图像生成；登录成功不代表图片权限已开通。")
+                    if not paths:
+                        raise PluginError("本次没有收到图片。请确认 Codex CLI 和账号支持内置图像生成；登录成功不代表图片权限已开通。")
+                    if ratio is not None:
+                        path = paths[0]
+                        data = path.read_bytes()
+                        cropped = await asyncio.to_thread(
+                            crop_to_ratio, data, RATIOS[ratio], self.settings.max_image_bytes,
+                        )
+                        if state.cancelled:
+                            raise PluginError("任务已取消。")
+                        if cropped is not data:
+                            path.write_bytes(cropped)
                 return paths
             except BaseException as exc:
                 for path in paths:

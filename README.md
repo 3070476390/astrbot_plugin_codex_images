@@ -2,7 +2,7 @@
 
 在 AstrBot 的“扩展功能 → Codex 绘图”中登录和管理统一 ChatGPT/Codex 订阅账号，让指定用户或所有聊天用户直接调用图像生成，由机器人回传图片。也可切换回每人独立账号模式。
 
-**版本：0.5.0，新增“允许所有用户使用”开关。** 支持文生图、图生图、动态模型查询和账号额度面板，扩展页面可管理登录、使用名单、群聊开关及绘图参数。后台逻辑与浏览器模拟交互已验证；真实账号额度、出图及消息平台仍待联调。无需填写 OpenAI API Key，也不会自动切换到按量付费 API。
+**版本 0.6.0 新增出图比例和重绘。** 支持文生图、图生图、动态模型查询和账号额度面板，扩展页面可管理登录、使用名单、群聊开关及绘图参数。真实账号额度、出图及消息平台仍待联调。插件通过订阅账号运行，无需填写 OpenAI API Key。
 
 ## 运行条件
 
@@ -17,11 +17,12 @@
 
 项目仓库现已公开。在 AstrBot **插件 → 安装插件（＋）→ 从链接安装** 中填写 `https://github.com/3070476390/astrbot_plugin_codex_images` 即可安装，也可下载下方 ZIP 后从文件安装。
 
-- [下载 0.5.0 插件安装包](https://github.com/3070476390/astrbot_plugin_codex_images/blob/main/downloads/astrbot_plugin_codex_images-v0.5.0.zip)：打开后点击下载原始文件按钮。
+- [下载 0.6.0 安装包](https://github.com/3070476390/astrbot_plugin_codex_images/raw/refs/heads/main/downloads/astrbot_plugin_codex_images-v0.6.0.zip)。
+- [下载 0.5.0 历史安装包](https://github.com/3070476390/astrbot_plugin_codex_images/blob/main/downloads/astrbot_plugin_codex_images-v0.5.0.zip)。
 - [浏览源码](https://github.com/3070476390/astrbot_plugin_codex_images)。也可在本地执行 `python scripts/build_zip.py`，安装包输出到 `dist/`。
 
-1. 使用上述仓库链接安装，或将下载的 `astrbot_plugin_codex_images-v0.5.0.zip` 上传到 AstrBot 插件管理的本地安装入口。手动放置源码时，目录为 `data/plugins/astrbot_plugin_codex_images/`，`main.py`、`metadata.yaml` 和 `views/` 应位于该目录顶层。
-2. 确保 AstrBot 进程能启动 Codex CLI；插件没有额外 Python 包依赖。
+1. 使用上述仓库链接安装，或将构建好的 `astrbot_plugin_codex_images-v0.6.0.zip` 上传到 AstrBot 插件管理的本地安装入口。手动放置源码时，目录为 `data/plugins/astrbot_plugin_codex_images/`，`main.py`、`metadata.yaml` 和 `views/` 应位于该目录顶层。
+2. 确保 AstrBot 进程能启动 Codex CLI。比例裁切使用 Pillow，AstrBot 4.29.4 已包含此依赖。
 3. 在插件配置中填写 `codex_command`，通常 Linux 为 `codex` 或其绝对路径。Windows 必须填写 **原生 `codex.exe` 的完整路径**；不执行 npm 的 `.cmd`、`.bat` 或 PowerShell 包装脚本。
 4. 重载插件并刷新 AstrBot 后台，左侧“扩展功能”中会出现 **Codex 绘图**。也可通过插件详情页打开 `dashboard` 视图。
 5. 在页面填写 Codex 路径，填写使用名单或开启“允许所有用户使用”，保存设置后点击“登录 Codex 订阅账号”。将官方地址复制到新标签页，输入页面给出的设备码，等待登录完成。
@@ -37,7 +38,9 @@
 /codex登录
 /codex状态
 /codex画图 一只撑着透明雨伞的橘猫，水彩插画，柔和的蓝绿色背景
+/codex画图 --比例 9:16 雨夜街景，手机壁纸
 /codex改图 保留人物，把背景改成雪山
+/codex重绘
 /codex模型
 /codex模型 2
 /codex额度
@@ -45,7 +48,7 @@
 /codex退出
 ```
 
-统一模式：管理员在扩展页面完成登录/退出。聊天端通过 `/codex画图`、`/codex改图`、`/codex模型`、`/codex额度`、`/codex状态` 和 `/codex取消` 使用；用户只能取消自己发起的任务。统一账号同时运行一个任务，繁忙时提示稍后重试。
+统一模式由管理员在扩展页面完成登录和退出。聊天端可使用绘图、改图、重绘、模型、额度、状态和取消命令。用户只能取消自己发起的任务。统一账号同时运行一个任务，繁忙时提示稍后重试。
 
 独立模式：用户私聊发送 `/codex登录` 后获取官方 `auth.openai.com` 页面和设备码，并在自己的浏览器登录。每个平台实例、每个用户仍有独立账号目录。两种模式的凭据均由 Codex 保存在 **机器人服务器** 上，不需要向机器人发送密码、令牌或 `auth.json`。
 
@@ -68,6 +71,12 @@
 `/codex图生图` 是 `/codex改图` 的别名。`/codex画图` 在消息附图或引用图片时也会自动进入图生图；不附图时继续文生图。同条消息中的图片优先于引用图片，不读取跨消息缓存或其他用户的最近图片。
 
 一次支持一张参考图，格式为 PNG、JPEG 或 WebP，大小不能超过配置中的 `max_image_mb`。GIF 等格式请先转换。参考图通过 AstrBot 的媒体解析器读取，复制到当前账号任务的临时目录，以 Codex `localImage` 输入传递；任务结束、失败或取消后清理插件创建的参考图副本，AstrBot 自身的媒体缓存由其管理。读取参考图计入本次绘图超时，支持中途取消。
+
+### 出图比例与重绘
+
+- 在 `/codex画图` 或 `/codex改图` 的描述前加 `--比例 1:1`、`--比例 9:16` 或 `--比例 16:9`。插件请 Codex 按指定比例构图，返回尺寸不符时居中裁切到精确比例。省略该参数时，按 Codex 返回的尺寸发送。
+- 引用自己带重绘编号的出图结果并发送 `/codex重绘`。如果平台将文字和图片分开发送，引用编号文字，或直接发送图片旁显示的 `/codex重绘 编号`。插件在当前会话复用原提示词、比例、调度模型设置和参考图，发起一次新的绘图任务并计入订阅用量。
+- 重绘记录只存于插件内存，限原发起人在同一会话使用。记录会在最近一次成功出图后保留最多 30 分钟。缓存达到 128 条或参考图共 64 MiB 时会淘汰较旧记录，插件重启后需重新发起绘图。
 
 ### 可见模型
 

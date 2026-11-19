@@ -4,6 +4,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from io import BytesIO
 
 PNG = base64.b64encode(b"\x89PNG\r\n\x1a\nfixture").decode()
 mode = os.environ.get("FAKE_MODE", "success")
@@ -74,6 +75,8 @@ for line in sys.stdin:
             result = {"data": [model_a, model_b], "nextCursor": None}
     elif method == "thread/start":
         assert request["params"]["sandbox"] == "read-only"
+        if mode == "ratio":
+            assert "exact width-to-height ratio" in request["params"]["baseInstructions"]
         result = {"thread": {"id": "thread"}}
     elif method == "turn/start":
         if mode == "edit":
@@ -91,6 +94,13 @@ for line in sys.stdin:
             continue
         if mode != "wait_image":
             item = {"id": "img", "type": "imageGeneration", "status": "completed", "result": PNG}
+            if mode == "ratio":
+                from PIL import Image
+
+                buffer = BytesIO()
+                with Image.new("RGBA", (160, 120), (40, 80, 120, 90)) as img:
+                    img.save(buffer, format="PNG")
+                item["result"] = base64.b64encode(buffer.getvalue()).decode()
             if mode == "bad_image":
                 item["result"] = "not base64"
             if mode == "file_id":

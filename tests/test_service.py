@@ -7,6 +7,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from PIL import Image
+
 from codex_images.errors import PluginError
 from codex_images.images import save_image
 from codex_images.rpc import child_environment
@@ -46,6 +48,16 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(paths), 1)
         self.assertEqual(paths[0].read_bytes(), PNG)
         self.assertIn(self.key, str(paths[0]))
+        self.assertFalse(self.service.sessions)
+
+    async def test_generation_returns_exact_ratio_and_preserves_alpha(self):
+        self.mode = "ratio"
+        for ratio, size in {"1:1": (120, 120), "9:16": (63, 112), "16:9": (160, 90)}.items():
+            with self.subTest(ratio=ratio):
+                paths = await self.service.generate(self.key, "cat", ratio=ratio)
+                with Image.open(paths[0]) as image:
+                    self.assertEqual(image.size, size)
+                    self.assertEqual(image.getpixel((0, 0)), (40, 80, 120, 90))
         self.assertFalse(self.service.sessions)
 
     async def test_device_login_early_notification_and_status(self):

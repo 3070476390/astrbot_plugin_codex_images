@@ -1,9 +1,14 @@
 import base64
 import binascii
+from io import BytesIO
 from pathlib import Path
 from uuid import uuid4
 
+from PIL import Image, ImageOps
+
 from .errors import PluginError
+
+MAX_CROP_PIXELS = 16_000_000
 
 
 def image_suffix(data: bytes) -> str:
@@ -14,6 +19,37 @@ def image_suffix(data: bytes) -> str:
     if data.startswith(b"RIFF") and data[8:12] == b"WEBP":
         return ".webp"
     raise PluginError("Codex 返回的内容不是支持的 PNG、JPEG 或 WebP 图片。")
+
+
+def crop_to_ratio(data: bytes, ratio: tuple[int, int], max_bytes: int) -> bytes:
+    """Center crop without stretching, retaining the input format and transparency."""
+    horizontal, vertical = ratio
+    try:
+        with Image.open(BytesIO(data), formats=("PNG", "JPEG", "WEBP")) as source:
+            width, height = source.size
+            if width * height > MAX_CROP_PIXELS:
+                raise PluginError("生成的图片像素过多，无法裁切到指定比例。")
+            if source.getexif().get(274) in (5, 6, 7, 8):
+                width, height = height, width
+            if width * vertical == height * horizontal:
+                source.load()
+                return data
+            scale = min(width // horizontal, height // vertical)
+            if not scale:
+                raise PluginError("生成的图片尺寸过小，无法裁切到指定比例。")
+            target_width, target_height = scale * horizontal, scale * vertical
+            left = (width - target_width) // 2
+            top = (height - target_height) // 2
+            with ImageOps.exif_transpose(source) as oriented:
+                with oriented.crop((left, top, left + target_width, top + target_height)) as cropped:
+                    result = BytesIO()
+                    options = {"quality": 95} if source.format in ("JPEG", "WEBP") else {}
+                    cropped.save(result, format=source.format, **options)
+    except (OSError, ValueError, Image.DecompressionBombError) as exc:
+        raise PluginError("无法处理生成的图片，未能裁切到指定比例。") from exc
+    if result.tell() > max_bytes:
+        raise PluginError("裁切后的图片超过大小限制。")
+    return result.getvalue()
 
 
 def save_image(item: dict, home: Path, workspace: Path, output: Path, max_bytes: int) -> Path:
