@@ -24,11 +24,14 @@ function fillForm(settings) {
     if (element.type === "checkbox") element.checked = value;
     else element.value = Array.isArray(value) ? value.join("\n") : value;
   }
+  $("openai_api_key").value = "";
+  $("clear-openai-key").checked = false;
   dirty = false;
   formHints();
 }
 
 function formHints() {
+  $("openai_api_key").disabled = $("clear-openai-key").checked;
   const allowAll = $("allow_all_users").checked;
   $("allowed_users").disabled = allowAll;
   $("allowlist-hint").textContent = allowAll
@@ -73,8 +76,13 @@ function render(state, resetForm = false) {
   $("tasks-summary").textContent = `${state.active_tasks} / ${state.settings.max_sessions}`;
   $("group-summary").textContent = state.settings.allow_group_images ? "已开启" : "未开启";
   $("openai-key-status").textContent = state.openai_key_configured
-    ? "服务器已配置 API 密钥。"
-    : "服务器尚未配置 API 密钥。";
+    ? "已保存 API Key。留空可保留现有密钥，填写新密钥可更换。"
+    : "尚未配置 API Key。填写后点击保存设置。";
+  $("clear-openai-key-row").hidden = !state.openai_key_configured;
+  if (!state.openai_key_configured) {
+    $("clear-openai-key").checked = false;
+    $("openai_api_key").disabled = false;
+  }
   renderQuota(state);
   controls();
 }
@@ -220,6 +228,9 @@ $("settings-form").addEventListener("submit", (event) => {
     else if (key === "allowed_users") payload[key] = element.value.split(/\r?\n/).map(v => v.trim()).filter(Boolean);
     else payload[key] = element.value.trim();
   }
+  const apiKey = $("openai_api_key").value.trim();
+  if ($("clear-openai-key").checked) payload.openai_api_key = "";
+  else if (apiKey) payload.openai_api_key = apiKey;
   void action("settings", payload, true);
 });
 $("reset").addEventListener("click", () => { fillForm(current.settings); controls(); notice(""); });

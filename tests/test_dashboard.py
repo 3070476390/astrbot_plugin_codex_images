@@ -29,26 +29,42 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.plugin.config.saved["allow_group_images"])
 
     async def test_api_settings_and_secret_presence(self):
-        from codex_images.openai_images import API_KEY_ENV
-
-        with patch.dict("os.environ", {API_KEY_ENV: "test-only-key"}):
-            state = await self.controller.save_settings({
-                "openai_api_enabled": True, "openai_image_model": "gpt-image-2", "openai_image_quality": "low",
-            })
-            self.assertTrue(state["openai_key_configured"])
-            self.assertTrue(state["settings"]["openai_api_enabled"])
-            self.assertEqual(self.plugin.service.settings.openai_image_model, "gpt-image-2")
-            self.assertEqual(self.plugin.service.settings.openai_image_quality, "low")
-            self.assertNotIn("test-only-key", str(state))
+        self.assertFalse(self.controller.state()["openai_key_configured"])
+        state = await self.controller.save_settings({
+            "openai_api_enabled": True, "openai_image_model": "gpt-image-2", "openai_image_quality": "low",
+            "openai_api_key": "  test-only-key  ",
+        })
+        self.assertTrue(state["openai_key_configured"])
+        self.assertTrue(state["settings"]["openai_api_enabled"])
+        self.assertEqual(self.plugin.service.settings.openai_image_model, "gpt-image-2")
+        self.assertEqual(self.plugin.service.settings.openai_image_quality, "low")
+        self.assertEqual(self.plugin.config.saved["openai_api_key"], "test-only-key")
+        self.assertNotIn("openai_api_key", state["settings"])
+        self.assertNotIn("test-only-key", str(state))
+        self.assertNotIn("test-only-key", repr(self.plugin.service.settings))
         with self.assertRaisesRegex(Exception, "模型 ID"):
             await self.controller.save_settings({"openai_image_model": "sk-secret"})
         self.assertEqual(self.plugin.service.settings.openai_image_model, "gpt-image-2")
+
+        await self.controller.save_settings({"openai_image_quality": "medium"})
+        self.assertEqual(self.plugin.config.saved["openai_api_key"], "test-only-key")
+        with patch.object(self.plugin.config, "save_config", side_effect=OSError("disk full")):
+            with self.assertRaisesRegex(Exception, "保存失败"):
+                await self.controller.save_settings({"openai_api_key": "replacement-key"})
+        self.assertEqual(self.plugin.config["openai_api_key"], "test-only-key")
+        self.assertEqual(self.plugin.service.settings.openai_api_key, "test-only-key")
+        await self.controller.save_settings({"openai_api_key": "replacement-key"})
+        self.assertEqual(self.plugin.service.settings.openai_api_key, "replacement-key")
+        state = await self.controller.save_settings({"openai_api_key": ""})
+        self.assertFalse(state["openai_key_configured"])
+        self.assertEqual(self.plugin.config.saved["openai_api_key"], "")
 
     async def test_invalid_settings_are_atomic(self):
         original = dict(self.plugin.config)
         for payload in [[], {"token": "secret"}, {"allow_group_images": "false"}, {"account_mode": "anything"},
                         {"allowed_users": ["bad"]}, {"allowed_users": ["qq:"]}, {"allowed_users": ["qq:1 2"]},
-                        {"request_timeout": 0}, {"model": []}, {"allow_all_users": "true"}, {"allow_all_users": 1}, {"allow_all_users": None}]:
+                        {"request_timeout": 0}, {"model": []}, {"allow_all_users": "true"}, {"allow_all_users": 1},
+                        {"allow_all_users": None}, {"openai_api_key": None}, {"openai_api_key": "invalid\nheader"}]:
             with self.subTest(payload=payload), self.assertRaises(Exception):
                 await self.controller.save_settings(payload)
             self.assertEqual(dict(self.plugin.config), original)

@@ -72,6 +72,7 @@ class Settings:
     max_prompt_chars: int = 4000
     openai_image_model: str = API_DEFAULT_MODEL
     openai_image_quality: str = "medium"
+    openai_api_key: str = field(default="", repr=False)
 
     @classmethod
     def from_config(cls, config):
@@ -88,6 +89,12 @@ class Settings:
         api_quality = config.get("openai_image_quality", "medium")
         if api_quality not in ("low", "medium", "high"):
             raise ValueError("OpenAI API 出图质量必须为 low、medium 或 high。")
+        api_key = config.get("openai_api_key", "")
+        if not isinstance(api_key, str) or len(api_key) > 2048:
+            raise ValueError("请填写有效的 OpenAI API Key。")
+        api_key = api_key.strip()
+        if any(not "!" <= char <= "~" for char in api_key):
+            raise ValueError("OpenAI API Key 不能包含空格或控制字符。")
         return cls(
             executable=str(config.get("codex_command", "codex")).strip() or "codex",
             model=str(config.get("model", "")).strip(),
@@ -99,6 +106,7 @@ class Settings:
             max_prompt_chars=integer("max_prompt_chars", 4000, 1, 16000),
             openai_image_model=api_model,
             openai_image_quality=api_quality,
+            openai_api_key=api_key,
         )
 
 

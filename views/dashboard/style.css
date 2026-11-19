@@ -27,6 +27,8 @@
   font-weight: 650;
 }
 .gallery-toggle { margin-top: 12px; }
+.field .clear-openai-key { display: flex; align-items: center; gap: 6px; margin: 12px 0 0; }
+.clear-openai-key input { width: auto; }
 .workspace-notice-hidden { display: none; }
 .gallery { padding: 24px; }
 .gallery-heading, .gallery-dialog-heading, .gallery-pages {

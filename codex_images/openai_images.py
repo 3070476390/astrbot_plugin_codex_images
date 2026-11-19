@@ -1,6 +1,5 @@
 import asyncio
 import json
-import os
 
 import httpx
 
@@ -9,7 +8,6 @@ from .errors import PluginError
 from .images import crop_to_ratio, decode_image, image_suffix
 
 API_JOB_KEY = "openai_api"
-API_KEY_ENV = "ASTRBOT_CODEX_IMAGES_OPENAI_API_KEY"
 API_DEFAULT_MODEL = "gpt-image-2.6-flare"
 API_SIZES = {"1:1": "1024x1024", "9:16": "1024x1536", "16:9": "1536x1024"}
 MIME_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".webp": "image/webp"}
@@ -22,18 +20,14 @@ API_ERRORS = {
 }
 
 
-def api_key() -> str:
-    return os.environ.get(API_KEY_ENV, "").strip()
-
-
 class OpenAIImages:
     def __init__(self, client_factory=httpx.AsyncClient):
         self.client_factory = client_factory
 
     async def generate(self, settings, caller, prompt, *, ratio, model, quality, reference_loader):
-        key = api_key()
+        key = settings.openai_api_key
         if not key:
-            raise PluginError("服务器尚未配置 OpenAI API Key，请联系管理员。")
+            raise PluginError("插件尚未配置 OpenAI API Key，请联系管理员。")
         max_bytes = settings.max_image_bytes
         try:
             async with asyncio.timeout(settings.generation_timeout):

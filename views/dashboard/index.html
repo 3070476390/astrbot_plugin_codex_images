@@ -8,7 +8,7 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand"><span class="brand-icon" aria-hidden="true">✦</span><div><h1>Codex 绘图</h1><p>绘图设置与图库</p></div><span class="version">v0.8.0</span></div>
+    <div class="brand"><span class="brand-icon" aria-hidden="true">✦</span><div><h1>Codex 绘图</h1><p>绘图设置与图库</p></div><span class="version">v0.8.1</span></div>
     <div class="connection"><span id="connection-dot" class="dot"></span><span id="connection-text">正在连接插件…</span></div>
   </header>
   <main>
@@ -73,8 +73,14 @@
               <div class="section-label"><h4>OpenAI API 绘图</h4></div>
               <div class="field">
                 <label class="toggle-row" for="openai_api_enabled"><span><strong>允许切换到 API 模式</strong><small>有绘图权限的用户可发送 /codex模式 API。出图按 OpenAI API 项目用量计费。</small></span><input id="openai_api_enabled" name="openai_api_enabled" type="checkbox" role="switch"></label>
+              </div>
+              <div class="field">
+                <label for="openai_api_key">OpenAI API Key</label>
+                <input id="openai_api_key" type="password" maxlength="2048" autocomplete="new-password" spellcheck="false" aria-describedby="openai-key-status">
                 <p id="openai-key-status" class="hint" role="status"></p>
-                <p class="hint">在 AstrBot 进程环境中设置 <code>ASTRBOT_CODEX_IMAGES_OPENAI_API_KEY</code>。</p>
+                <label id="clear-openai-key-row" for="clear-openai-key" class="clear-openai-key" hidden>
+                  <input id="clear-openai-key" type="checkbox"> 清除已保存的密钥
+                </label>
               </div>
               <div class="two-columns">
                 <div class="field"><label for="openai_image_model">图像模型</label><input id="openai_image_model" name="openai_image_model" placeholder="gpt-image-2.6-flare" maxlength="100" spellcheck="false" required></div>

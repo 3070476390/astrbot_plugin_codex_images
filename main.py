@@ -14,7 +14,7 @@ from .codex_images.dashboard import DashboardController, SHARED_KEY
 from .codex_images.drawing import DRAWING_ID, DrawingRequest, RedrawHistory, parse_drawing_prompt
 from .codex_images.gallery import Gallery
 from .codex_images.message_images import load_reference, quoted_drawing_id, reference_from_message
-from .codex_images.openai_images import API_JOB_KEY, api_key
+from .codex_images.openai_images import API_JOB_KEY
 from .codex_images.quota import format_quota
 
 
@@ -71,8 +71,8 @@ class CodexImagesPlugin(Star):
     def _require_api(self):
         if self.config.get("openai_api_enabled") is not True:
             raise PluginError("管理员尚未启用 OpenAI API 绘图。可发送 /codex模式 Codex 使用订阅模式。")
-        if not api_key():
-            raise PluginError("服务器尚未配置 OpenAI API Key，请联系管理员。")
+        if not self.service.settings.openai_api_key:
+            raise PluginError("插件尚未配置 OpenAI API Key，请联系管理员。")
 
     def _check(self, event, private=False):
         if private and not event.is_private_chat():
@@ -171,7 +171,7 @@ class CodexImagesPlugin(Star):
             caller = self._check(event, private=True)
             if await self._backend(caller) == "api":
                 self._require_api()
-                yield event.plain_result("当前使用 OpenAI API 模式，服务器已配置密钥。模型权限以实际请求为准。")
+                yield event.plain_result("当前使用 OpenAI API 模式，插件已配置密钥。模型权限以实际请求为准。")
                 return
             state = await self.service.status(self._account_key(caller))
             if state.get("busy"):

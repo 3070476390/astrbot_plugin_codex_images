@@ -10,7 +10,7 @@ import httpx
 from PIL import Image
 
 from codex_images.errors import PluginError
-from codex_images.openai_images import API_KEY_ENV, OpenAIImages
+from codex_images.openai_images import OpenAIImages
 from codex_images.service import ImageService, Settings, user_key
 
 
@@ -19,12 +19,9 @@ class ApiImagesTests(unittest.IsolatedAsyncioTestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.key = user_key("mock-platform", "mock-user")
-        self.settings = Settings()
+        self.settings = Settings.from_config({"openai_api_key": "test-only-key"})
         self.service = ImageService(Path(self.temp.name), self.settings)
         self.addAsyncCleanup(self.service.close)
-        env_patch = patch.dict("os.environ", {API_KEY_ENV: "test-only-key"})
-        env_patch.start()
-        self.addCleanup(env_patch.stop)
         buffer = BytesIO()
         with Image.new("RGB", (160, 120), "blue") as img:
             img.save(buffer, format="PNG")
@@ -58,6 +55,16 @@ class ApiImagesTests(unittest.IsolatedAsyncioTestCase):
         with Image.open(result) as image:
             self.assertEqual(image.size, (63, 112))
         self.assertFalse(self.service.sessions)
+
+    async def test_missing_configured_key_never_uses_environment(self):
+        self.settings.openai_api_key = ""
+        self.mock_api(lambda request: self.fail("an API request was sent without a configured key"))
+        with patch.dict("os.environ", {
+            "ASTRBOT_CODEX_IMAGES_OPENAI_API_KEY": "unused-legacy-key",
+            "OPENAI_API_KEY": "unused-global-key",
+        }):
+            with self.assertRaisesRegex(PluginError, "尚未配置"):
+                await self.generate(ratio=None)
 
     async def test_edit_sends_reference_as_multipart_and_keeps_the_response(self):
         async def handler(request):

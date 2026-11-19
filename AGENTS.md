@@ -29,3 +29,9 @@
 - 项目入口为 main.py，协议及服务模块在 codex_images/，安装与限制见 README.md。
 - 测试：python -m unittest discover -s tests -v；打包：python scripts/build_zip.py。
 - 管理页面在 views/dashboard/；浏览器模拟测试：node tests/view_smoke.cjs（需 Playwright 和 Edge）。界面截图使用模拟状态，不代表真实登录验证。
+
+## 发布流程
+
+- 用户要求本项目变更完成并验证后，例行同步到公开仓库 `3070476390/astrbot_plugin_codex_images` 的 `main`。
+- 有新版本时，用 `python scripts/build_zip.py` 构建安装包，将 ZIP 上传到对应版本的 GitHub Release，并核对公开下载与本地包的 SHA-256。README 中的安装链接指向 GitHub Releases。
+- 源码仓库使用 `.gitignore` 排除 `dist/` 和 `downloads/`。ZIP 安装包作为 Release 附件发布。

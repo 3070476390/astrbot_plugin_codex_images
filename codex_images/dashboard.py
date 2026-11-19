@@ -5,7 +5,6 @@ import json
 from pathlib import Path
 
 from .errors import PluginError
-from .openai_images import api_key
 from .service import Settings, user_key
 
 SHARED_KEY = user_key("__astrbot_codex_dashboard__", "shared")
@@ -28,12 +27,18 @@ class DashboardController:
     def login_pending(self):
         return self.login_task is not None and not self.login_task.done()
 
+    def _config_values(self, *, include_secrets=False):
+        return {
+            key: copy.deepcopy(self.plugin.config.get(key, schema["default"]))
+            for key, schema in SCHEMA.items() if include_secrets or not schema.get("secret")
+        }
+
     def state(self):
         return {
-            "version": "0.8.0",
-            "settings": {k: copy.deepcopy(self.plugin.config.get(k, v["default"])) for k, v in SCHEMA.items()},
+            "version": "0.8.1",
+            "settings": self._config_values(),
             "account": dict(self.account),
-            "openai_key_configured": bool(api_key()),
+            "openai_key_configured": bool(self.service.settings.openai_api_key),
             "quota": copy.deepcopy(self.quota) if self.plugin.account_mode == "shared" else None,
             "login_pending": self.login_pending,
             "busy": SHARED_KEY in self.service.sessions or SHARED_KEY in self.plugin.image_owners,
@@ -128,7 +133,14 @@ class DashboardController:
     async def save_settings(self, payload):
         if not isinstance(payload, dict) or set(payload) - set(SCHEMA):
             raise PluginError("配置格式错误或包含不支持的字段。")
-        candidate = self.state()["settings"]
+        async with self.lock:
+            if self.login_pending or self.service.active_tasks or self.plugin.image_owners:
+                raise PluginError("有任务正在运行，请等待完成或取消后保存设置。")
+            self._apply_settings(payload)
+            return self.state()
+
+    def _apply_settings(self, payload):
+        candidate = self._config_values(include_secrets=True)
         candidate.update(payload)
         for key, value in candidate.items():
             kind = SCHEMA[key]["type"]
@@ -150,21 +162,18 @@ class DashboardController:
             settings = Settings.from_config(candidate)
         except ValueError as exc:
             raise PluginError(str(exc)) from exc
-        async with self.lock:
-            if self.login_pending or self.service.sessions or self.plugin.image_owners:
-                raise PluginError("有任务正在运行，请等待完成或取消后保存设置。")
-            old = dict(self.plugin.config)
-            try:
-                self.plugin.config.update(candidate)
-                # AstrBot saves this small configuration atomically and synchronously.
-                self.plugin.config.save_config()
-            except Exception as exc:
-                self.plugin.config.clear()
-                self.plugin.config.update(old)
-                raise PluginError("配置保存失败，当前运行设置未更改。") from exc
-            self.service.settings = settings
-            self.quota = None
-            return self.state()
+        candidate["openai_api_key"] = settings.openai_api_key
+        old = dict(self.plugin.config)
+        try:
+            self.plugin.config.update(candidate)
+            # AstrBot saves this small configuration atomically and synchronously.
+            self.plugin.config.save_config()
+        except Exception as exc:
+            self.plugin.config.clear()
+            self.plugin.config.update(old)
+            raise PluginError("配置保存失败，当前运行设置未更改。") from exc
+        self.service.settings = settings
+        self.quota = None
 
     async def close(self):
         await self._stop_login()

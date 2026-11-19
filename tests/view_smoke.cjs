@@ -5,7 +5,7 @@ const path = require('node:path');
 const { chromium } = require('playwright');
 const root = path.resolve(__dirname, '..');
 const schema = JSON.parse(fs.readFileSync(path.join(root, '_conf_schema.json'), 'utf8'));
-const settings = Object.fromEntries(Object.entries(schema).map(([key, value]) => [key, value.default]));
+const settings = Object.fromEntries(Object.entries(schema).filter(([, value]) => !value.secret).map(([key, value]) => [key, value.default]));
 
 (async () => {
   const browser = await chromium.launch({ channel: 'msedge', headless: true });
@@ -19,7 +19,7 @@ const settings = Object.fromEntries(Object.entries(schema).map(([key, value]) =>
       await route.fulfill({ path: path.join(root, 'views/dashboard', name), contentType: name.endsWith('.js') ? 'text/javascript' : name.endsWith('.css') ? 'text/css' : 'text/html' });
     });
     await page.addInitScript(settings => {
-      let state = {version: '0.8.0', settings, account: {status: 'signed_out', message: '尚未登录统一账号。'}, openai_key_configured: true, quota: null, login_pending: false, busy: false, active_tasks: 0};
+      let state = {version: '0.8.1', settings, account: {status: 'signed_out', message: '尚未登录统一账号。'}, openai_key_configured: false, quota: null, login_pending: false, busy: false, active_tasks: 0};
       const thumbnail = 'UklGRjYAAABXRUJQVlA4ICoAAACQAQCdASoIAAYAAUAmJaACdLoAA5gA/tom/xbSOhU6v/jeOtvrb2UAAAA=';
       const gallery = Array.from({length: 13}, (_, index) => ({
         id: index.toString(16).padStart(32, '0'), created: 1793700000 - index * 5,
@@ -29,6 +29,7 @@ const settings = Object.fromEntries(Object.entries(schema).map(([key, value]) =>
       }));
       window.quotaMode = 'ready';
       window.quotaCalls = 0;
+      window.keyChanges = [];
       window.setBusy = value => {state.busy = value;};
       window.rejectSave = false;
       window.finishLogin = () => {state.account = {status: 'logged_in', message: '统一账号登录成功，可以向机器人发送绘图指令。'};state.login_pending = false;};
@@ -47,7 +48,12 @@ const settings = Object.fromEntries(Object.entries(schema).map(([key, value]) =>
         apiPost: async (endpoint, body) => {
           if (endpoint.endsWith('/settings')) {
             if (window.rejectSave) throw new Error('模拟保存失败，请重试');
-            state.settings = body;
+            const {openai_api_key: apiKey, ...settings} = body;
+            if (apiKey !== undefined) {
+              window.keyChanges.push(apiKey);
+              state.openai_key_configured = Boolean(apiKey);
+            }
+            state.settings = settings;
             state.quota = null;
           }
           if (endpoint.endsWith('/login')) {
@@ -79,8 +85,9 @@ const settings = Object.fromEntries(Object.entries(schema).map(([key, value]) =>
     assert.equal(await page.locator('#refresh-quota').isDisabled(), true);
     assert.equal(await page.locator('#openai_api_enabled').isChecked(), false);
     assert.equal(await page.locator('#gallery_enabled').isChecked(), true);
-    assert.equal(await page.locator('#openai-key-status').innerText(), '服务器已配置 API 密钥。');
+    assert.equal(await page.locator('#openai-key-status').innerText(), '尚未配置 API Key。填写后点击保存设置。');
     await page.locator('#openai_api_enabled').check();
+    await page.locator('#openai_api_key').fill('mock-api-key');
     await page.locator('#openai_image_model').fill('gpt-image-2');
     await page.locator('#openai_image_quality').selectOption('low');
     await page.locator('#allowed_users').fill('qq_bot:123456789');
@@ -91,6 +98,8 @@ const settings = Object.fromEntries(Object.entries(schema).map(([key, value]) =>
     assert.equal(await page.locator('#openai_api_enabled').isChecked(), true);
     assert.equal(await page.locator('#openai_image_model').inputValue(), 'gpt-image-2');
     assert.equal(await page.locator('#openai_image_quality').inputValue(), 'low');
+    assert.equal(await page.locator('#openai_api_key').inputValue(), '');
+    assert.ok((await page.locator('#openai-key-status').innerText()).includes('已保存 API Key'));
     // Enabling all users keeps the existing allowlist for later restoration.
     assert.equal(await page.locator('#allow_all_users').isChecked(), false);
     await page.locator('#allow_all_users').check();
@@ -193,8 +202,14 @@ const settings = Object.fromEntries(Object.entries(schema).map(([key, value]) =>
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'mobile gallery overflow');
     await page.getByRole('button', {name: '绘图设置', exact: true}).click();
     await page.locator('#settings-form').waitFor();
+    assert.deepEqual(await page.evaluate(() => window.keyChanges), ['mock-api-key']);
+    await page.locator('#clear-openai-key').check();
+    assert.equal(await page.locator('#openai_api_key').isDisabled(), true);
+    await page.locator('#save').click();
+    await page.getByText('尚未配置 API Key。填写后点击保存设置。', {exact: true}).waitFor();
+    assert.deepEqual(await page.evaluate(() => window.keyChanges), ['mock-api-key', '']);
     assert.deepEqual(errors, []);
-    console.log('PASS: settings, account, quota, gallery filters, pagination, preview and download, responsive layout');
+    console.log('PASS: settings, API key save/retention/removal, account, quota, gallery and responsive layout');
   } finally {
     await browser.close();
   }
