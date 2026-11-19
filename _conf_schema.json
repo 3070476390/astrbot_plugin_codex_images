@@ -1,0 +1,12 @@
+{
+  "codex_command": {"description": "Codex 可执行文件", "type": "string", "default": "codex", "hint": "必须安装在 AstrBot 所在环境。Windows 请填写原生 codex.exe 完整路径。"},
+  "model": {"description": "Codex 调度模型", "type": "string", "default": "", "hint": "留空使用 Codex 默认模型。填写账号可用的 Codex 模型，不是 gpt-image 模型名。"},
+  "allow_group_images": {"description": "允许群聊绘图", "type": "bool", "default": false, "hint": "开启后图片会发到请求所在群聊；账号操作仍仅限私聊。"},
+  "allowed_users": {"description": "允许使用的用户", "type": "list", "default": [], "hint": "留空允许所有用户使用自己的账号。格式为 平台实例ID:用户ID，可通过 AstrBot /sid 查询。"},
+  "max_sessions": {"description": "最大同时运行任务数", "type": "int", "default": 4, "hint": "1–32，包含登录等待和绘图任务。每个用户同时只能运行一个任务。"},
+  "request_timeout": {"description": "协议请求超时（秒）", "type": "int", "default": 30},
+  "login_timeout": {"description": "登录等待超时（秒）", "type": "int", "default": 900},
+  "generation_timeout": {"description": "绘图超时（秒）", "type": "int", "default": 300},
+  "max_image_mb": {"description": "最大图片大小（MB）", "type": "int", "default": 20, "hint": "1–30"},
+  "max_prompt_chars": {"description": "图片描述最大字符数", "type": "int", "default": 4000}
+}

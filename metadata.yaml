@@ -1,0 +1,7 @@
+name: astrbot_plugin_codex_images
+display_name: Codex 订阅绘图
+desc: 通过官方 Codex 设备码登录个人订阅账号，调用内置图像生成并回传图片。
+version: v0.1.0
+author: snowy
+repo: ""
+astrbot_version: ">=4.9.2,<5"
