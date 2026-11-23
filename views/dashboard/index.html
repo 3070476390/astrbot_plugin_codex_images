@@ -8,7 +8,7 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand"><span class="brand-icon" aria-hidden="true">✦</span><div><h1>Codex 绘图</h1><p>绘图设置与图库</p></div><span class="version">v0.8.3</span></div>
+    <div class="brand"><span class="brand-icon" aria-hidden="true">✦</span><div><h1>Codex 绘图</h1><p>绘图设置与图库</p></div><span class="version">v0.8.4</span></div>
     <div class="connection"><span id="connection-dot" class="dot"></span><span id="connection-text">正在连接插件…</span></div>
   </header>
   <main>
@@ -61,7 +61,7 @@
               <div class="divider"></div>
               <div class="section-label"><span>02</span><h4>生成与连接</h4></div>
               <div class="field"><label for="codex_command">Codex 可执行文件</label><input id="codex_command" name="codex_command" placeholder="codex" required maxlength="2048" spellcheck="false"><p class="hint">填写 AstrBot 所在机器或容器内的路径。Windows 请填写原生 codex.exe 的完整路径。</p></div>
-              <div class="field"><label for="model">调度模型 <span class="optional">可选</span></label><input id="model" name="model" placeholder="留空，使用 Codex 默认模型" maxlength="2048" spellcheck="false"><p class="hint">发送 /codex模型 查看账号可见的 Codex 模型。图生图需要模型支持图片输入；实际生图权限以调用结果为准。</p></div>
+              <div class="field"><label for="model">默认调度模型 <span class="optional">可选</span></label><input id="model" name="model" placeholder="留空，使用 Codex 默认模型" maxlength="2048" spellcheck="false"><p class="hint">用户可用 /codex模型 查看并按编号切换模型。图生图需要模型支持图片输入，实际出图权限以调用结果为准。</p></div>
               <div class="two-columns"><div class="field"><label for="generation_timeout">绘图超时 <span class="unit">秒</span></label><input id="generation_timeout" name="generation_timeout" type="number" min="30" max="1800" step="1" required></div><div class="field"><label for="max_prompt_chars">描述长度上限 <span class="unit">字符</span></label><input id="max_prompt_chars" name="max_prompt_chars" type="number" min="1" max="16000" step="1" required></div></div>
               <details id="advanced"><summary>高级设置 <span>并发、登录超时与图片大小</span></summary><div class="two-columns advanced-grid">
                 <div class="field"><label for="max_sessions">最大任务数</label><input id="max_sessions" name="max_sessions" type="number" min="1" max="32" step="1" required><p class="hint">统一账号同时只处理一个任务。</p></div>
@@ -97,7 +97,7 @@
             <div class="form-footer"><p>有任务运行时，请先等待完成再保存。</p><div><button id="reset" type="button" disabled>还原修改</button><button id="save" type="submit" class="primary" disabled>保存设置</button></div></div>
           </form>
         </section>
-        <section class="quick-start"><div class="quick-icon" aria-hidden="true">✎</div><div><h3>连接完成，去聊天里试一试</h3><p>文生图：/codex画图 图片描述<br>图生图：附带或引用一张图片，发送 /codex改图 修改要求<br>模型列表：/codex模型，可带页码。<br>账号额度：/codex额度，查看用量与重置时间。</p><code>/codex改图 保留主体，把背景改成雪山</code></div><span class="tag subtle">文生图 · 图生图</span></section>
+        <section class="quick-start"><div class="quick-icon" aria-hidden="true">✎</div><div><h3>连接完成，去聊天里试一试</h3><p>文生图：/codex画图 图片描述<br>图生图：附带或引用一张图片，发送 /codex改图 修改要求<br>模型：/codex模型 查看列表，/codex模型 2 切换到编号 2。<br>账号额度：/codex额度，查看用量与重置时间。</p><code>/codex改图 保留主体，把背景改成雪山</code></div><span class="tag subtle">文生图 · 图生图</span></section>
       </div>
     </div>
     <section id="gallery" class="card gallery" aria-labelledby="gallery-title" hidden>

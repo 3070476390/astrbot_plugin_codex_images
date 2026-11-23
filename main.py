@@ -14,11 +14,13 @@ from .codex_images.dashboard import DashboardController, SHARED_KEY
 from .codex_images.drawing import DRAWING_ID, DrawingRequest, RedrawHistory, parse_drawing_prompt
 from .codex_images.gallery import Gallery
 from .codex_images.message_images import load_reference, quoted_drawing_id, reference_from_message
+from .codex_images.models import format_model_catalog, model_label, parse_model_action
 from .codex_images.openai_images import API_JOB_KEY
 from .codex_images.quota import format_quota
 
 DRAWING_MODES = {"1": ("codex", "Codex 订阅"), "2": ("api", "OpenAI API")}
 MODE_SWITCH_HINT = "发送 /codex模式 1 或 /codex模式 2 切换模式。"
+MAX_MODEL_CATALOGS = 128
 
 
 class CodexImagesPlugin(Star):
@@ -28,6 +30,7 @@ class CodexImagesPlugin(Star):
         self.image_owners = {}
         self.cancelled_images = set()
         self.redraw_history = RedrawHistory()
+        self.model_catalogs = {}
         self._plugin_context = context
         root = Path(get_astrbot_data_path()) / "plugin_data" / "astrbot_plugin_codex_images"
         self.service = ImageService(root, Settings.from_config(config))
@@ -71,6 +74,20 @@ class CodexImagesPlugin(Star):
         stored = await self.get_kv_data(f"drawing_backend:{caller}", "codex")
         return "api" if stored == "api" else "codex"
 
+    async def _drawing_model(self, caller, key):
+        selected = await self.get_kv_data(f"drawing_model:{caller}:{key}", "")
+        if isinstance(selected, str) and selected:
+            return selected
+        settings = self.service.settings
+        return settings.openai_image_model if key == API_JOB_KEY else settings.model
+
+    async def _list_drawing_models(self, key):
+        if key == API_JOB_KEY:
+            self._require_api()
+            result = await self.dashboard.list_openai_models()
+            return [{"model": model} for model in result["models"]]
+        return await self.service.list_models(key)
+
     def _require_api(self):
         if self.config.get("openai_api_enabled") is not True:
             raise PluginError("管理员尚未启用 OpenAI API 绘图。可发送 /codex模式 1 使用订阅模式。")
@@ -111,7 +128,7 @@ class CodexImagesPlugin(Star):
             "/codex画图 [--比例 9:16] 图片描述：生成一张图，支持 1:1、9:16、16:9\n"
             "/codex改图 [--比例 9:16] 修改要求：附带或引用一张图\n"
             "/codex重绘 [编号]：引用自己的出图结果，或输入重绘编号再生成一张\n"
-            "/codex模型 [页码]：查看当前模式的模型\n"
+            "/codex模型 [编号]：查看模型列表或按编号切换\n"
             "/codex额度：查看当前模式的用量查询方式\n"
             "/codex取消：停止当前登录或绘图任务\n"
             "是否能生成图片取决于账号权限和可用额度。" + gallery_help
@@ -251,50 +268,58 @@ class CodexImagesPlugin(Star):
 
     @filter.command("codex模型", alias={"codex模型列表"})
     async def models_command(self, event: AstrMessageEvent):
-        """查询当前绘图账号可见的调度模型，可带页码。"""
+        """查看当前绘图模式的模型列表，或按编号切换。"""
         try:
             caller = self._check(event)
-            parts = event.get_message_str().strip().split()
-            if len(parts) > 2 or (len(parts) == 2 and (not parts[1].isascii() or not parts[1].isdigit() or len(parts[1]) > 6)):
-                raise PluginError("用法：/codex模型 或 /codex模型 2")
-            page = int(parts[1]) if len(parts) == 2 else 1
-            if page < 1:
-                raise PluginError("页码从 1 开始。")
-            if await self._backend(caller) == "api":
-                self._require_api()
-                if page != 1:
-                    raise PluginError("当前 API 图像模型只显示在第 1 页。")
-                yield event.plain_result(f"当前 OpenAI API 图像模型为 {self.service.settings.openai_image_model}。")
+            action, number = parse_model_action(event.get_message_str())
+            use_api = await self._backend(caller) == "api"
+            self._check(event)
+            key = API_JOB_KEY if use_api else self._account_key(caller)
+            preference = f"drawing_model:{caller}:{key}"
+            scope = (event.unified_msg_origin, caller, key)
+            models = self.model_catalogs.get(scope)
+            if action == "reset":
+                await self.put_kv_data(preference, "")
+                yield event.plain_result("已恢复当前绘图模式的管理员默认模型。")
                 return
-            key = self._account_key(caller)
-            models = await self.service.list_models(key)
+            if action == "select":
+                if models is None:
+                    raise PluginError("请先在当前会话发送 /codex模型 查看可选编号。")
+                if number > len(models):
+                    raise PluginError("模型编号超出范围，请发送 /codex模型 查看可选编号。")
+                selected = models[number - 1]["model"]
+                available = await self._list_drawing_models(key)
+                self._check(event)
+                if use_api:
+                    self._require_api()
+                elif key != self._account_key(caller):
+                    raise PluginError("绘图账号设置刚刚变更，请发送 /codex模型 重新查看列表。")
+                if not any(item["model"] == selected for item in available):
+                    raise PluginError("所选模型已不在目录中，请发送 /codex模型 刷新列表。")
+                await self.put_kv_data(preference, selected)
+                yield event.plain_result(f"已切换绘图模型为 {model_label(selected)}。")
+                return
+            if action == "list" or models is None:
+                models = await self._list_drawing_models(key)
+            elif use_api:
+                self._require_api()
             if not models:
-                raise PluginError("Codex 没有返回可见模型，请检查账号权限或 CLI 版本。")
-            page_size = 10
-            pages = (len(models) + page_size - 1) // page_size
-            if page > pages:
-                raise PluginError(f"模型列表只有 {pages} 页。")
-            # Bound individual catalog strings so platform text limits are respected.
-            def clean(value, limit=100):
-                return " ".join(str(value).split())[:limit]
-            lines = [f"当前账号可见模型（{page}/{pages} 页，共 {len(models)} 个）"]
-            for model in models[(page - 1) * page_size:page * page_size]:
-                flags = []
-                if model["model"] == self.service.settings.model:
-                    flags.append("当前设置")
-                if model["is_default"]:
-                    flags.append("默认")
-                flags.append("图片输入" if "image" in model["input_modalities"] else "无图片输入")
-                lines.append(f"• {clean(model['model'])} · {' / '.join(flags)}")
-            lines.append("这是调度模型列表；支持图片输入不等于已开通图像生成权限。")
-            if page < pages:
-                lines.append(f"下一页：/codex模型 {page + 1}")
-            yield event.plain_result("\n".join(lines))
+                self.model_catalogs.pop(scope, None)
+                raise PluginError("当前绘图账号没有返回可选模型。")
+            current = await self._drawing_model(caller, key)
+            self._check(event)
+            message = format_model_catalog(models, number, current, use_api=use_api)
+            # Remember the numbering shown in this conversation even if the provider reorders its list.
+            self.model_catalogs.pop(scope, None)
+            if len(self.model_catalogs) >= MAX_MODEL_CATALOGS:
+                del self.model_catalogs[next(iter(self.model_catalogs))]
+            self.model_catalogs[scope] = models
+            yield event.plain_result(message)
         except PluginError as exc:
             yield event.plain_result(str(exc))
         except Exception as exc:
-            logger.error("Codex 模型查询异常 (%s)", type(exc).__name__)
-            yield event.plain_result("模型查询失败，请检查账号登录状态和 Codex 版本。")
+            logger.error("绘图模型操作异常 (%s)", type(exc).__name__)
+            yield event.plain_result("模型操作失败，请检查当前绘图账号和网络。")
 
     @filter.command("codex画图")
     async def image_command(self, event: AstrMessageEvent):
@@ -345,9 +370,13 @@ class CodexImagesPlugin(Star):
                 if require_reference and reference is None:
                     raise PluginError("没有找到参考图，请将图片与 /codex改图 修改要求 一起发送，或引用一条带图消息。")
                 drawing_id = uuid4().hex[:12]
-                settings = self.service.settings
-                model = settings.openai_image_model if use_api else settings.model
-                quality = settings.openai_image_quality if use_api else None
+                model = await self._drawing_model(caller, key)
+                self._check(event)
+                if use_api:
+                    self._require_api()
+                elif key != self._account_key(caller):
+                    raise PluginError("绘图账号设置刚刚变更，请重新发送绘图命令。")
+                quality = self.service.settings.openai_image_quality if use_api else None
             if key in self.image_owners or (key == SHARED_KEY and self.dashboard.login_pending):
                 raise PluginError("绘图账号正在处理其他任务，请稍后重试。")
             if caller in self.image_owners.values():
@@ -424,3 +453,4 @@ class CodexImagesPlugin(Star):
         await self.dashboard.close()
         await self.service.close()
         self.redraw_history.clear()
+        self.model_catalogs.clear()

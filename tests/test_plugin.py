@@ -500,12 +500,91 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
         ])
         first = (await self._consume(self.plugin.models_command(Event("codex模型"))))[0]
         self.assertIn("1/2", first)
-        self.assertIn("model-0", first)
+        self.assertRegex(first, r"(?m)^1\. model-0.*✓")
+        self.assertEqual(first.count("✓"), 1)
         self.assertIn("默认", first)
         self.assertIn("图片输入", first)
-        second = (await self._consume(self.plugin.models_command(Event("codex模型 2"))))[0]
-        self.assertIn("model-11", second)
-        self.assertNotIn("• model-0", second)
+        second = (await self._consume(self.plugin.models_command(Event("codex模型 页 2"))))[0]
+        self.assertRegex(second, r"(?m)^12\. model-11\b")
+        self.assertNotRegex(second, r"(?m)^1\. model-0\b")
+
+    async def test_numbered_codex_model_keeps_the_displayed_id_and_user_scope(self):
+        self.plugin.config.update(account_mode="shared", allow_all_users=True, allow_group_images=True)
+        self.plugin.service.settings.model = "base-model"
+        models = [
+            {"model": model, "is_default": default, "input_modalities": ["image"]}
+            for model, default in [("base-model", True), ("selected-model", False)]
+        ]
+        self.plugin.service.list_models = AsyncMock(return_value=models)
+        self.plugin.service.generate = AsyncMock(return_value=[])
+        await self._consume(self.plugin.models_command(Event("codex模型", private=False)))
+        self.plugin.service.list_models.return_value = list(reversed(models))
+
+        for event in (
+            Event("codex模型 2", private=False, sender="2"),
+            Event("codex模型 2", private=False, group="other-group"),
+        ):
+            result, = await self._consume(self.plugin.models_command(event))
+            self.assertIn("/codex模型", result)
+        self.assertFalse(self.plugin.kv)
+
+        selected, = await self._consume(self.plugin.models_command(Event("codex模型 2", private=False)))
+        self.assertIn("selected-model", selected)
+        self.assertEqual(self.plugin.service.settings.model, "base-model")
+        listing, = await self._consume(self.plugin.models_command(Event("codex模型", private=False)))
+        self.assertRegex(listing, r"(?m)^\d+\. selected-model.*✓")
+        self.assertEqual(listing.count("✓"), 1)
+
+        for sender, model in (("1", "selected-model"), ("2", "base-model")):
+            await self._consume(self.plugin.image_command(Event("codex画图 cat", sender=sender)))
+            self.assertEqual(self.plugin.service.generate.await_args.kwargs["model"], model)
+
+    async def test_removed_model_number_preserves_the_current_model(self):
+        base = {"model": "base-model", "is_default": True, "input_modalities": ["image"]}
+        removed = {"model": "removed-model", "is_default": False, "input_modalities": ["image"]}
+        replacement = {"model": "replacement-model", "is_default": False, "input_modalities": ["image"]}
+        self.plugin.service.list_models = AsyncMock(side_effect=[[base, removed], [base, replacement]])
+        await self._consume(self.plugin.models_command(Event("codex模型")))
+        result, = await self._consume(self.plugin.models_command(Event("codex模型 2")))
+        self.assertIn("/codex模型", result)
+        self.assertFalse(self.plugin.kv)
+
+    async def test_numbered_api_model_switch_reset_and_redraw(self):
+        default, selected = "gpt-image-2", "gpt-image-2.5-flare"
+        await self.plugin.dashboard.save_settings({
+            "openai_api_enabled": True, "openai_api_key": "test-only-key",
+            "openai_image_model": default,
+        })
+        self.plugin.service.api.list_models = AsyncMock(return_value=[default, selected])
+        self.plugin.service.list_models = AsyncMock()
+        await self._consume(self.plugin.mode_command(Event("codex模式 2")))
+        listing, = await self._consume(self.plugin.models_command(Event("codex模型")))
+        self.assertRegex(listing, rf"(?m)^1\. {default}.*✓")
+        self.assertRegex(listing, rf"(?m)^2\. {selected}\b")
+        result, = await self._consume(self.plugin.models_command(Event("codex模型 2")))
+        self.assertIn(selected, result)
+        self.assertEqual(self.plugin.service.settings.openai_image_model, default)
+
+        async def render(*args, **kwargs):
+            job = Path(self.temp.name) / "model-choice"
+            job.mkdir()
+            image = job / "image.png"
+            with PILImage.new("RGB", (12, 8), "blue") as generated:
+                generated.save(image)
+            return [image]
+
+        self.plugin.service.generate_api = AsyncMock(side_effect=render)
+        image_request = Event("codex画图 cat")
+        self.assertEqual(await self._consume(self.plugin.image_command(image_request)), [])
+        self.assertEqual(self.plugin.service.generate_api.await_args.kwargs["model"], selected)
+        drawing_id = image_request.sent[-1].chain[-1].text.rsplit(" ", 1)[-1]
+
+        await self._consume(self.plugin.models_command(Event("codex模型 默认")))
+        await self._consume(self.plugin.image_command(Event("codex画图 cat")))
+        self.assertEqual(self.plugin.service.generate_api.await_args.kwargs["model"], default)
+        await self._consume(self.plugin.redraw_command(Event(f"codex重绘 {drawing_id}")))
+        self.assertEqual(self.plugin.service.generate_api.await_args.kwargs["model"], selected)
+        self.plugin.service.list_models.assert_not_awaited()
 
     async def test_model_lookup_requires_permission_and_valid_page(self):
         self.plugin.config.update(account_mode="shared", allowed_users=[])

@@ -37,7 +37,7 @@ class DashboardController:
 
     def state(self):
         return {
-            "version": "0.8.3",
+            "version": "0.8.4",
             "settings": self._config_values(),
             "account": dict(self.account),
             "openai_key_configured": bool(self.service.settings.openai_api_key),

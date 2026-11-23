@@ -67,7 +67,7 @@ class AppServer:
         self.stderr_reader = asyncio.create_task(self._drain_stderr())
         try:
             await self.request("initialize", {
-                "clientInfo": {"name": "astrbot_codex_images", "version": "0.8.3"},
+                "clientInfo": {"name": "astrbot_codex_images", "version": "0.8.4"},
                 "capabilities": {"experimentalApi": True},
             })
             await self._write({"method": "initialized", "params": {}})

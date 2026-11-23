@@ -2,7 +2,7 @@
 
 在 AstrBot 的“扩展功能 → Codex 绘图”中管理 Codex 订阅账号和 OpenAI API 绘图。机器人通过同一组聊天命令回传图片。Codex 模式可用统一账号或每人独立账号。
 
-**版本 0.8.3 为 `/codex模式` 增加编号菜单。** 两种绘图模式都支持文生图、单图编辑、出图比例、重绘和临时图库。真实账号和消息平台联调仍待完成。
+**版本 0.8.4 支持用 `/codex模型` 查看并按编号切换模型。** 两种绘图模式都支持文生图、单图编辑、出图比例、重绘和临时图库。真实账号和消息平台联调仍待完成。
 
 ## 运行条件
 
@@ -16,10 +16,10 @@
 
 在 AstrBot **插件 → 安装插件（＋）→ 从链接安装** 中填写 `https://github.com/3070476390/astrbot_plugin_codex_images`。也可以从 GitHub Releases 下载 ZIP，再在 AstrBot 中从文件安装。
 
-- [下载 v0.8.3 安装包](https://github.com/3070476390/astrbot_plugin_codex_images/releases/download/v0.8.3/astrbot_plugin_codex_images-v0.8.3.zip)
+- [下载 v0.8.4 安装包](https://github.com/3070476390/astrbot_plugin_codex_images/releases/download/v0.8.4/astrbot_plugin_codex_images-v0.8.4.zip)
 - [查看所有版本和安装包](https://github.com/3070476390/astrbot_plugin_codex_images/releases)
 
-1. 将安装包上传到 AstrBot 插件管理的本地安装入口。从当前源码运行 `python scripts/build_zip.py` 可在 `dist/` 生成 v0.8.3 安装包。手动放置源码时，目录为 `data/plugins/astrbot_plugin_codex_images/`，`main.py`、`metadata.yaml` 和 `views/` 应位于该目录顶层。
+1. 将安装包上传到 AstrBot 插件管理的本地安装入口。从当前源码运行 `python scripts/build_zip.py` 可在 `dist/` 生成 v0.8.4 安装包。手动放置源码时，目录为 `data/plugins/astrbot_plugin_codex_images/`，`main.py`、`metadata.yaml` 和 `views/` 应位于该目录顶层。
 2. 插件使用 Pillow 和 HTTPX，AstrBot 4.29.4 已包含这些依赖。
 3. 使用 Codex 订阅时，在插件配置中填写 `codex_command`，Linux 通常为 `codex` 或其绝对路径。Windows 使用原生 `codex.exe` 的完整路径。
 4. 重载插件并刷新 AstrBot 后台，左侧“扩展功能”中会出现 **Codex 绘图**。也可通过插件详情页打开 `dashboard` 视图。
@@ -43,7 +43,9 @@
 /codex改图 保留人物，把背景改成雪山
 /codex重绘
 /codex模型
-/codex模型 2
+/codex模型 页 2
+/codex模型 12
+/codex模型 默认
 /codex额度
 /codex取消
 /codex退出
@@ -99,15 +101,13 @@ API 模式直接调用 OpenAI Images API，文生图使用 `/v1/images/generatio
 - 引用自己的出图结果发送 `/codex重绘`。如果平台将文字和图片分开发送，引用编号文字，或直接发送图片旁显示的 `/codex重绘 编号`。重绘复用原提示词、比例、模型、参考图及 API 出图质量。重绘时需处于原出图模式，用量计入该模式。
 - 重绘记录只存于插件内存，限原发起人在同一会话使用。记录会在最近一次成功出图后保留最多 30 分钟。缓存达到 128 条或参考图共 64 MiB 时会淘汰较旧记录，插件重启后需重新发起绘图。
 
-### 可见模型
+### 查看和切换模型
 
-API 模式下，`/codex模型` 显示管理员配置的图像模型。
+发送 `/codex模型` 或 `/codex模型列表` 查看当前绘图模式下的模型。列表每页显示 10 个模型，编号跨页连续，当前模型末尾带 ✓。用 `/codex模型 页 2` 查看第二页，在同一会话中发送 `/codex模型 12` 切换到编号 12 的模型。用 `/codex模型 默认` 恢复使用后台默认模型。
 
-发送 `/codex模型` 或 `/codex模型列表` 查询 **当前绘图账号** 通过 Codex `model/list` 返回的可见调度模型。统一模式查询统一账号，独立模式查询自己的账号；需要先登录并拥有插件使用权限。
+选择按用户和绘图模式保存。Codex 统一账号和独立账号各自保存选择。切换影响该用户之后发起的绘图，重绘继续使用原任务的模型。
 
-列表按每页 10 个模型展示，使用 `/codex模型 2` 查看下一页，并标注默认模型、当前配置和图片输入能力。模型名称来自实际返回值，不写死在插件中。可将返回的模型 ID 填入扩展页面的“调度模型”设置。
-
-该列表不是独立的 GPT Image 模型目录，也不会自动切换模型。支持图片输入表示可接收参考图，**不代表账号或该模型已具备内置生图权限**；能否生成或编辑图片仍以实际调用为准。
+Codex 模式通过 `model/list` 获取已登录账号可见的调度模型，并标注默认模型与图片输入能力。OpenAI API 模式使用已保存的密钥查询项目可见的图像模型。出图权限以实际调用结果为准。
 
 ### 账号额度
 
