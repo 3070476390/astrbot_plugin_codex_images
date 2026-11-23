@@ -34,4 +34,5 @@
 
 - 用户要求本项目变更完成并验证后，例行同步到公开仓库 `3070476390/astrbot_plugin_codex_images` 的 `main`。
 - 有新版本时，用 `python scripts/build_zip.py` 构建安装包，将 ZIP 上传到对应版本的 GitHub Release，并核对公开下载与本地包的 SHA-256。README 中的安装链接指向 GitHub Releases。
+- 各版本的变更内容写在对应的 GitHub Release 说明中。README 保留项目功能、安装与使用说明，最新安装包入口使用 `/releases/latest`。
 - 源码仓库使用 `.gitignore` 排除 `dist/` 和 `downloads/`。ZIP 安装包作为 Release 附件发布。

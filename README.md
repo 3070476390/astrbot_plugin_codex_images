@@ -2,7 +2,7 @@
 
 在 AstrBot 的“扩展功能 → Codex 绘图”中管理 Codex 订阅账号和 OpenAI API 绘图。机器人通过同一组聊天命令回传图片。Codex 模式可用统一账号或每人独立账号。
 
-**版本 0.8.4 支持用 `/codex模型` 查看并按编号切换模型。** 两种绘图模式都支持文生图、单图编辑、出图比例、重绘和临时图库。真实账号和消息平台联调仍待完成。
+两种绘图模式都支持文生图、单图编辑、出图比例、重绘和临时图库。用户可以在聊天中按编号切换绘图模式和模型。真实账号和消息平台联调仍待完成。
 
 ## 运行条件
 
@@ -16,17 +16,17 @@
 
 在 AstrBot **插件 → 安装插件（＋）→ 从链接安装** 中填写 `https://github.com/3070476390/astrbot_plugin_codex_images`。也可以从 GitHub Releases 下载 ZIP，再在 AstrBot 中从文件安装。
 
-- [下载 v0.8.4 安装包](https://github.com/3070476390/astrbot_plugin_codex_images/releases/download/v0.8.4/astrbot_plugin_codex_images-v0.8.4.zip)
-- [查看所有版本和安装包](https://github.com/3070476390/astrbot_plugin_codex_images/releases)
+- [获取最新安装包](https://github.com/3070476390/astrbot_plugin_codex_images/releases/latest)
+- [查看各版本的更新说明和安装包](https://github.com/3070476390/astrbot_plugin_codex_images/releases)
 
-1. 将安装包上传到 AstrBot 插件管理的本地安装入口。从当前源码运行 `python scripts/build_zip.py` 可在 `dist/` 生成 v0.8.4 安装包。手动放置源码时，目录为 `data/plugins/astrbot_plugin_codex_images/`，`main.py`、`metadata.yaml` 和 `views/` 应位于该目录顶层。
+1. 将安装包上传到 AstrBot 插件管理的本地安装入口。从源码运行 `python scripts/build_zip.py` 可在 `dist/` 生成安装包。手动放置源码时，目录为 `data/plugins/astrbot_plugin_codex_images/`，`main.py`、`metadata.yaml` 和 `views/` 应位于该目录顶层。
 2. 插件使用 Pillow 和 HTTPX，AstrBot 4.29.4 已包含这些依赖。
 3. 使用 Codex 订阅时，在插件配置中填写 `codex_command`，Linux 通常为 `codex` 或其绝对路径。Windows 使用原生 `codex.exe` 的完整路径。
 4. 重载插件并刷新 AstrBot 后台，左侧“扩展功能”中会出现 **Codex 绘图**。也可通过插件详情页打开 `dashboard` 视图。
 5. 填写使用名单或开启“允许所有用户使用”。统一账号可通过“登录 Codex 订阅账号”获取设备码并完成登录。使用 API 模式时，按下面的配置步骤启用。
 6. 允许的聊天用户发送 `/codex画图 图片描述` 即可绘图。
 
-升级 0.1.0：新版本默认使用统一账号模式，需要在扩展页面单独登录，**不会自动把任何原有用户凭据复制为统一账号**。切换到“每人独立账号”可继续使用原有个人登录记录。未开启“允许所有用户使用”时，空使用名单在统一模式中仅允许 AstrBot 聊天管理员。
+插件默认使用统一账号模式，由管理员在扩展页面单独登录。切换到“每人独立账号”后，用户可使用各自的 Codex 登录记录。统一模式下，关闭“允许所有用户使用”且使用名单为空时，仅 AstrBot 聊天管理员可用。
 
 如果使用官方 npm 包，在 Linux 上可通过 `npm install -g @openai/codex` 安装 CLI。以官方 [CLI 文档](https://learn.chatgpt.com/docs/cli) 为准。Windows 可使用已有桌面应用附带的 CLI 或官方原生二进制；升级后绝对路径可能变化，需要同步更新配置。
 
@@ -61,7 +61,7 @@
 
 ### OpenAI API 模式
 
-1. 在 **插件 → Codex 绘图 → 配置**，或 **扩展功能 → Codex 绘图 → 绘图设置 → OpenAI API 绘图** 填写 OpenAI API Key。此前通过环境变量配置的部署，升级后需要在这里重新填写密钥。
+1. 在 **插件 → Codex 绘图 → 配置**，或 **扩展功能 → Codex 绘图 → 绘图设置 → OpenAI API 绘图** 填写 OpenAI API Key。
 2. 打开 **扩展功能 → Codex 绘图 → 绘图设置 → OpenAI API 绘图**。保存密钥后，图片模型下拉列表会显示该 API 项目可见的 GPT Image 模型，也可手动刷新。选择模型，启用 **允许切换到 API 模式**，再保存。默认模型为 `gpt-image-2.6-flare`，默认质量为中。
 3. 有绘图权限的用户发送 `/codex模式` 可查看模式列表，当前模式带有 ✓。用 `/codex模式 1` 切换到 Codex 订阅，用 `/codex模式 2` 切换到 OpenAI API，原有的 `Codex` 和 `API` 参数也可继续使用。插件按平台实例和用户保存选择，首次使用默认为 Codex。
 
@@ -75,15 +75,15 @@ API 模式直接调用 OpenAI Images API，文生图使用 `/v1/images/generatio
 
 打开 **扩展功能 → Codex 绘图 → 图库**。AstrBot 后台管理员可以按模式和关键词筛选，点击图片查看较大预览、生成时间、提示词和尺寸，也可以下载原图。
 
-- 默认收录更新后新生成的结果，包括私聊和群聊出图。图库保留原图、缩略图、提示词和生成参数中用于展示的模型及模式。关闭 **绘图设置 → 将新出图存入临时图库** 后，已有图片仍可查看至到期。
+- 默认收录新生成的结果，包括私聊和群聊出图。图库保留原图、缩略图、提示词和生成参数中用于展示的模型及模式。关闭 **绘图设置 → 将新出图存入临时图库** 后，已有图片仍可查看至到期。
 - 图片最多保留 7 天，插件运行时定期清理到期数据。图库最多保存 120 张，原图和缩略图合计上限 256 MiB，达到上限时先清理最早生成的图片。
-- 图库存储在 AstrBot 插件数据目录的 `gallery/images.sqlite3`，从升级后的第一张新图开始积累。重启后仍可查看有效记录。
+- 图库存储在 AstrBot 插件数据目录的 `gallery/images.sqlite3`，从启用收录后的第一张新图开始积累。重启后仍可查看有效记录。
 
 ### 允许所有用户使用
 
 在 **扩展功能 → Codex 绘图 → 绘图设置 → 账号与访问** 中打开 **允许所有用户使用**，点击 **保存设置**，即可让所有能向机器人发送指令的用户使用插件，无需逐个填写 ID。也可在原生插件配置中将 `allow_all_users` 设为 `true`，再按该面板提示重载插件。
 
-统一模式下所有调用共用管理员登录的账号和额度，独立模式下仍使用每个人自己的账号。已有使用名单会保留；关闭此开关后，名单规则恢复。新开关默认关闭，升级不会自动改变原来的访问范围。
+统一模式下所有调用共用管理员登录的账号和额度，独立模式下每个人使用自己的账号。该开关默认关闭。开启后会保留已有使用名单，关闭时恢复名单规则。
 
 若希望在群里使用，还需打开 **允许群聊绘图**。AstrBot 自身的访问控制仍需允许这些消息进入插件。所有用户模式也不授予后台管理权限；用户仍只能取消自己发起的绘图任务。
 
