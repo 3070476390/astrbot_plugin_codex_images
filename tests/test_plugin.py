@@ -224,6 +224,45 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(received[0][3], {"ratio": "9:16", "model": "original-model"})
         self.assertFalse(list(Path(self.temp.name).glob("job-*")))
 
+    async def test_mode_menu_marks_only_the_current_mode(self):
+        result, = await self._consume(self.plugin.mode_command(Event("codex模式")))
+        self.assertIn("1. Codex 订阅 ✓", result.splitlines())
+        self.assertIn("2. OpenAI API", result.splitlines())
+        self.assertEqual(result.count("✓"), 1)
+        self.assertIn("/codex模式", result)
+        self.assertFalse(self.plugin.kv)
+
+    async def test_numeric_switch_updates_only_the_requesting_users_mode(self):
+        await self.plugin.dashboard.save_settings({
+            "openai_api_enabled": True, "openai_api_key": "test-only-key",
+        })
+        event = Event("codex模式 2")
+        caller = self.plugin._check(event)
+        await self._consume(self.plugin.mode_command(event))
+        self.assertEqual(await self.plugin._backend(caller), "api")
+
+        result, = await self._consume(self.plugin.mode_command(Event("codex模式")))
+        self.assertIn("1. Codex 订阅", result.splitlines())
+        self.assertIn("2. OpenAI API ✓", result.splitlines())
+        self.assertEqual(result.count("✓"), 1)
+
+        other, = await self._consume(self.plugin.mode_command(Event("codex模式", sender="2")))
+        self.assertIn("1. Codex 订阅 ✓", other.splitlines())
+        self.assertEqual(other.count("✓"), 1)
+
+        await self._consume(self.plugin.mode_command(Event("codex模式 1  ")))
+        self.assertEqual(await self.plugin._backend(caller), "codex")
+
+    async def test_numeric_switch_rejects_invalid_or_unavailable_modes(self):
+        unavailable, = await self._consume(self.plugin.mode_command(Event("codex模式 2")))
+        self.assertIn("尚未启用", unavailable)
+        self.plugin.config["openai_api_enabled"] = True
+        missing_key, = await self._consume(self.plugin.mode_command(Event("codex模式 2")))
+        self.assertIn("尚未配置", missing_key)
+        invalid, = await self._consume(self.plugin.mode_command(Event("codex模式 3")))
+        self.assertIn("/codex模式", invalid)
+        self.assertFalse(self.plugin.kv)
+
     async def test_api_mode_is_opt_in_and_preserves_the_original_backend_on_redraw(self):
         self.plugin.service.generate = AsyncMock(return_value=[])
         self.plugin.service.generate_api = AsyncMock()

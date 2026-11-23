@@ -19,7 +19,7 @@ const settings = Object.fromEntries(Object.entries(schema).filter(([, value]) =>
       await route.fulfill({ path: path.join(root, 'views/dashboard', name), contentType: name.endsWith('.js') ? 'text/javascript' : name.endsWith('.css') ? 'text/css' : 'text/html' });
     });
     await page.addInitScript(settings => {
-      let state = {version: '0.8.2', settings, account: {status: 'signed_out', message: '尚未登录统一账号。'}, openai_key_configured: false, openai_key_revision: 'initial', quota: null, login_pending: false, busy: false, active_tasks: 0};
+      let state = {version: '0.8.3', settings, account: {status: 'signed_out', message: '尚未登录统一账号。'}, openai_key_configured: false, openai_key_revision: 'initial', quota: null, login_pending: false, busy: false, active_tasks: 0};
       const thumbnail = 'UklGRjYAAABXRUJQVlA4ICoAAACQAQCdASoIAAYAAUAmJaACdLoAA5gA/tom/xbSOhU6v/jeOtvrb2UAAAA=';
       const gallery = Array.from({length: 13}, (_, index) => ({
         id: index.toString(16).padStart(32, '0'), created: 1793700000 - index * 5,

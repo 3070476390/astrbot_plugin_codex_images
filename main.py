@@ -17,6 +17,9 @@ from .codex_images.message_images import load_reference, quoted_drawing_id, refe
 from .codex_images.openai_images import API_JOB_KEY
 from .codex_images.quota import format_quota
 
+DRAWING_MODES = {"1": ("codex", "Codex 订阅"), "2": ("api", "OpenAI API")}
+MODE_SWITCH_HINT = "发送 /codex模式 1 或 /codex模式 2 切换模式。"
+
 
 class CodexImagesPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
@@ -70,7 +73,7 @@ class CodexImagesPlugin(Star):
 
     def _require_api(self):
         if self.config.get("openai_api_enabled") is not True:
-            raise PluginError("管理员尚未启用 OpenAI API 绘图。可发送 /codex模式 Codex 使用订阅模式。")
+            raise PluginError("管理员尚未启用 OpenAI API 绘图。可发送 /codex模式 1 使用订阅模式。")
         if not self.service.settings.openai_api_key:
             raise PluginError("插件尚未配置 OpenAI API Key，请联系管理员。")
 
@@ -103,7 +106,7 @@ class CodexImagesPlugin(Star):
         gallery_help = "\n新出图会在后台图库暂存最多 7 天，供 AstrBot 后台管理员浏览。" if self.gallery_enabled else ""
         yield event.plain_result(
             "Codex 绘图\n" + account_help +
-            "/codex模式 [Codex|API]：查询或切换自己的绘图模式\n"
+            "/codex模式 [1|2]：查看绘图模式列表或按编号切换\n"
             "/codex状态：查询登录状态\n"
             "/codex画图 [--比例 9:16] 图片描述：生成一张图，支持 1:1、9:16、16:9\n"
             "/codex改图 [--比例 9:16] 修改要求：附带或引用一张图\n"
@@ -120,19 +123,30 @@ class CodexImagesPlugin(Star):
         try:
             caller = self._check(event)
             parts = event.get_message_str().split(maxsplit=1)
-            selected = parts[1].strip().lower() if len(parts) == 2 else await self._backend(caller)
-            if selected not in {"codex", "api"}:
-                raise PluginError("用法：/codex模式、/codex模式 Codex 或 /codex模式 API")
-            if len(parts) == 2:
+            if len(parts) < 2:
+                selected = await self._backend(caller)
+                lines = ["绘图模式"]
+                for number, (mode, label) in DRAWING_MODES.items():
+                    marker = " ✓" if mode == selected else ""
+                    lines.append(f"{number}. {label}{marker}")
+                lines.append(MODE_SWITCH_HINT)
                 if selected == "api":
-                    self._require_api()
-                await self.put_kv_data(f"drawing_backend:{caller}", selected)
+                    try:
+                        self._require_api()
+                    except PluginError as exc:
+                        lines.append(str(exc))
+                yield event.plain_result("\n".join(lines))
+                return
+
+            option = parts[1].strip().lower()
+            selected = next((mode for number, (mode, _) in DRAWING_MODES.items() if option in (number, mode)), None)
+            if selected is None:
+                raise PluginError(f"发送 /codex模式 查看列表。\n{MODE_SWITCH_HINT}")
+            if selected == "api":
+                self._require_api()
+            await self.put_kv_data(f"drawing_backend:{caller}", selected)
             if selected == "api":
                 message = "当前绘图模式为 OpenAI API，绘图用量计入管理员配置的 API 项目。"
-                try:
-                    self._require_api()
-                except PluginError as exc:
-                    message += "\n" + str(exc)
             else:
                 message = "当前绘图模式为 Codex，绘图使用 Codex 订阅额度。"
             yield event.plain_result(message)
