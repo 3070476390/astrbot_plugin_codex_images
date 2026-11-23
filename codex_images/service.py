@@ -1,7 +1,6 @@
 import asyncio
 import hashlib
 import json
-import re
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -12,7 +11,7 @@ from collections.abc import Awaitable, Callable
 from .drawing import RATIOS, RATIO_HELP
 from .errors import PluginError, RpcError
 from .images import crop_to_ratio, image_suffix, save_image, write_image
-from .openai_images import API_DEFAULT_MODEL, OpenAIImages
+from .openai_images import API_DEFAULT_MODEL, OpenAIImages, is_image_model_id
 from .quota import normalize_quota
 from .rpc import AppServer
 
@@ -83,8 +82,7 @@ class Settings:
             return value
 
         api_model = config.get("openai_image_model", API_DEFAULT_MODEL)
-        if (not isinstance(api_model, str) or len(api_model) > 100
-                or not re.fullmatch(r"(?:gpt-image-[a-z0-9.-]+|chatgpt-image-latest)", api_model)):
+        if not is_image_model_id(api_model):
             raise ValueError("请填写有效的 GPT Image 模型 ID。")
         api_quality = config.get("openai_image_quality", "medium")
         if api_quality not in ("low", "medium", "high"):

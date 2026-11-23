@@ -65,6 +65,58 @@ class ApiImagesTests(unittest.IsolatedAsyncioTestCase):
         }):
             with self.assertRaisesRegex(PluginError, "尚未配置"):
                 await self.generate(ratio=None)
+            with self.assertRaisesRegex(PluginError, "尚未配置"):
+                await self.service.api.list_models(self.settings)
+
+    async def test_model_catalog_queries_saved_key_and_filters_image_models(self):
+        async def handler(request):
+            self.assertEqual(request.method, "GET")
+            self.assertEqual(str(request.url), "https://api.openai.com/v1/models")
+            self.assertEqual(request.headers["Authorization"], "Bearer test-only-key")
+            self.assertEqual(await request.aread(), b"")
+            return httpx.Response(200, json={"data": [
+                {"id": "gpt-image-2"},
+                {"id": "gpt-image-2"},
+                {"id": "gpt-image-2.5-flare", "shutdown_date": None},
+                {"id": "chatgpt-image-latest", "shutdown_date": "2099-12-31"},
+                {"id": "gpt-image-1"},
+                {"id": "gpt-image-2-2026-04-21", "shutdown_date": "2000-01-01"},
+                {"id": "dall-e-3"},
+                {"id": "gpt-5.5"},
+                {"id": "text-embedding-3-large"},
+                {"id": "gpt-image-invalid id"},
+                {"id": 123},
+                {"unexpected": True},
+                None,
+            ]})
+
+        self.mock_api(handler)
+        self.assertEqual(
+            await self.service.api.list_models(self.settings),
+            ["chatgpt-image-latest", "gpt-image-2", "gpt-image-2.5-flare"],
+        )
+        self.assertFalse(self.service.sessions)
+        self.assertEqual(self.service.active_tasks, 0)
+
+    async def test_model_catalog_can_be_empty(self):
+        self.mock_api(lambda _: httpx.Response(200, json={"data": [{"id": "gpt-5.5"}]}))
+        self.assertEqual(await self.service.api.list_models(self.settings), [])
+
+    async def test_model_catalog_errors_hide_provider_details(self):
+        for status, response in (
+            (401, {"error": {"message": "private-provider-detail"}}),
+            (403, {"error": {"message": "private-provider-detail"}}),
+            (429, {"error": {"message": "private-provider-detail"}}),
+            (500, {"error": {"message": "private-provider-detail"}}),
+            (200, {"data": {"message": "private-provider-detail"}}),
+        ):
+            with self.subTest(status=status):
+                self.mock_api(lambda _: httpx.Response(status, json=response))
+                with self.assertRaises(PluginError) as raised:
+                    await self.service.api.list_models(self.settings)
+                error = str(raised.exception)
+                self.assertNotIn("private-provider-detail", error)
+                self.assertNotIn("test-only-key", error)
 
     async def test_edit_sends_reference_as_multipart_and_keeps_the_response(self):
         async def handler(request):

@@ -19,7 +19,7 @@ const settings = Object.fromEntries(Object.entries(schema).filter(([, value]) =>
       await route.fulfill({ path: path.join(root, 'views/dashboard', name), contentType: name.endsWith('.js') ? 'text/javascript' : name.endsWith('.css') ? 'text/css' : 'text/html' });
     });
     await page.addInitScript(settings => {
-      let state = {version: '0.8.1', settings, account: {status: 'signed_out', message: '尚未登录统一账号。'}, openai_key_configured: false, quota: null, login_pending: false, busy: false, active_tasks: 0};
+      let state = {version: '0.8.2', settings, account: {status: 'signed_out', message: '尚未登录统一账号。'}, openai_key_configured: false, openai_key_revision: 'initial', quota: null, login_pending: false, busy: false, active_tasks: 0};
       const thumbnail = 'UklGRjYAAABXRUJQVlA4ICoAAACQAQCdASoIAAYAAUAmJaACdLoAA5gA/tom/xbSOhU6v/jeOtvrb2UAAAA=';
       const gallery = Array.from({length: 13}, (_, index) => ({
         id: index.toString(16).padStart(32, '0'), created: 1793700000 - index * 5,
@@ -30,6 +30,10 @@ const settings = Object.fromEntries(Object.entries(schema).filter(([, value]) =>
       window.quotaMode = 'ready';
       window.quotaCalls = 0;
       window.keyChanges = [];
+      window.openAIModelCalls = 0;
+      window.openAIModels = ['gpt-image-2', 'gpt-image-1.5'];
+      window.rejectModelList = false;
+      window.rotateKey = () => { state.openai_key_revision = 'changed-externally'; };
       window.setBusy = value => {state.busy = value;};
       window.rejectSave = false;
       window.finishLogin = () => {state.account = {status: 'logged_in', message: '统一账号登录成功，可以向机器人发送绘图指令。'};state.login_pending = false;};
@@ -46,12 +50,19 @@ const settings = Object.fromEntries(Object.entries(schema).filter(([, value]) =>
         },
         download: async (endpoint, params) => {window.downloaded = {endpoint, id: params.id};},
         apiPost: async (endpoint, body) => {
+          if (endpoint === 'dashboard/openai-models') {
+            window.openAIModelCalls++;
+            if (!state.openai_key_configured || Object.keys(body).length) throw new Error('模型查询应只使用已保存的 API Key。');
+            if (window.rejectModelList) throw new Error('模拟模型目录读取失败。');
+            return { models: structuredClone(window.openAIModels) };
+          }
           if (endpoint.endsWith('/settings')) {
             if (window.rejectSave) throw new Error('模拟保存失败，请重试');
             const {openai_api_key: apiKey, ...settings} = body;
             if (apiKey !== undefined) {
               window.keyChanges.push(apiKey);
               state.openai_key_configured = Boolean(apiKey);
+              state.openai_key_revision = `saved-${window.keyChanges.length}`;
             }
             state.settings = settings;
             state.quota = null;
@@ -86,9 +97,10 @@ const settings = Object.fromEntries(Object.entries(schema).filter(([, value]) =>
     assert.equal(await page.locator('#openai_api_enabled').isChecked(), false);
     assert.equal(await page.locator('#gallery_enabled').isChecked(), true);
     assert.equal(await page.locator('#openai-key-status').innerText(), '尚未配置 API Key。填写后点击保存设置。');
+    assert.equal(await page.locator('#refresh-openai-models').isDisabled(), true);
+    assert.equal(await page.evaluate(() => window.openAIModelCalls), 0);
     await page.locator('#openai_api_enabled').check();
     await page.locator('#openai_api_key').fill('mock-api-key');
-    await page.locator('#openai_image_model').fill('gpt-image-2');
     await page.locator('#openai_image_quality').selectOption('low');
     await page.locator('#allowed_users').fill('qq_bot:123456789');
     await page.locator('#allow_group_images').check();
@@ -96,7 +108,27 @@ const settings = Object.fromEntries(Object.entries(schema).filter(([, value]) =>
     await page.getByText('设置已保存，将用于下一次任务。').waitFor();
     assert.equal(await page.locator('#users-summary').innerText(), '1 位用户 + 管理员');
     assert.equal(await page.locator('#openai_api_enabled').isChecked(), true);
+    await page.getByText('已读取 2 个图片模型。', {exact: false}).waitFor();
+    assert.equal(await page.locator('#openai_image_model').inputValue(), settings.openai_image_model);
+    assert.equal(await page.locator('#openai_image_model option[value="gpt-image-2"]').count(), 1);
+    await page.locator('#openai_image_model').selectOption('gpt-image-2');
+    await page.evaluate(() => { window.rejectModelList = true; });
+    await page.locator('#refresh-openai-models').click();
+    await page.getByText('模拟模型目录读取失败。', {exact: true}).waitFor();
     assert.equal(await page.locator('#openai_image_model').inputValue(), 'gpt-image-2');
+    await page.evaluate(() => {
+      window.rejectModelList = false;
+      window.openAIModels = ['gpt-image-1.5'];
+      window.rotateKey();
+    });
+    await page.getByText('已读取 1 个图片模型。', {exact: false}).waitFor();
+    assert.equal(await page.locator('#openai_image_model').inputValue(), 'gpt-image-2');
+    assert.equal(await page.locator('#openai_image_model option[value="gpt-image-1.5"]').count(), 1);
+    assert.equal(await page.locator('#openai_image_model option[value="gpt-image-2.6-flare"]').count(), 0);
+    await page.locator('#save').click();
+    await page.getByText('设置已保存，将用于下一次任务。').waitFor();
+    assert.equal(await page.locator('#openai_image_model').inputValue(), 'gpt-image-2');
+    assert.equal(await page.evaluate(() => window.openAIModelCalls), 3);
     assert.equal(await page.locator('#openai_image_quality').inputValue(), 'low');
     assert.equal(await page.locator('#openai_api_key').inputValue(), '');
     assert.ok((await page.locator('#openai-key-status').innerText()).includes('已保存 API Key'));
@@ -208,8 +240,10 @@ const settings = Object.fromEntries(Object.entries(schema).filter(([, value]) =>
     await page.locator('#save').click();
     await page.getByText('尚未配置 API Key。填写后点击保存设置。', {exact: true}).waitFor();
     assert.deepEqual(await page.evaluate(() => window.keyChanges), ['mock-api-key', '']);
+    assert.equal(await page.locator('#refresh-openai-models').isDisabled(), true);
+    assert.equal(await page.locator('#openai_image_model option[value="gpt-image-1.5"]').count(), 0);
     assert.deepEqual(errors, []);
-    console.log('PASS: settings, API key save/retention/removal, account, quota, gallery and responsive layout');
+    console.log('PASS: settings, API key and image-model selection, account, quota, gallery and responsive layout');
   } finally {
     await browser.close();
   }

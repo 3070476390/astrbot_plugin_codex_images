@@ -4,6 +4,7 @@ const $ = (id) => document.getElementById(id);
 const bridge = window.AstrBotPluginView || window.AstrBotPluginPage;
 const numeric = ["max_sessions", "request_timeout", "login_timeout", "generation_timeout", "max_image_mb", "max_prompt_chars"];
 let current = null, dirty = false, operationPending = false, connected = false, sequence = 0, pollTimer;
+let openAIModels = [], modelRequestId = 0, loadingModels = false;
 
 function notice(message, error = false) {
   $("notice").textContent = message;
@@ -21,13 +22,58 @@ function fillForm(settings) {
   for (const [key, value] of Object.entries(settings)) {
     const element = $(key);
     if (!element) continue;
-    if (element.type === "checkbox") element.checked = value;
+    if (key === "openai_image_model") showOpenAIModels(value);
+    else if (element.type === "checkbox") element.checked = value;
     else element.value = Array.isArray(value) ? value.join("\n") : value;
   }
   $("openai_api_key").value = "";
   $("clear-openai-key").checked = false;
   dirty = false;
   formHints();
+}
+
+function showOpenAIModels(selection = $("openai_image_model").value) {
+  const select = $("openai_image_model");
+  const options = openAIModels.map((model) => new Option(model, model));
+  if (selection && !openAIModels.includes(selection)) {
+    options.unshift(new Option(openAIModels.length ? `${selection}（当前选择，未出现在目录中）` : selection, selection));
+  }
+  select.replaceChildren(...options);
+  select.value = selection;
+}
+
+function modelStatus(message, error = false) {
+  const status = $("openai-model-status");
+  status.textContent = message;
+  status.classList.toggle("danger-text", error);
+}
+
+async function loadOpenAIModels() {
+  if (!current?.openai_key_configured || loadingModels) return;
+  const requestId = ++modelRequestId;
+  loadingModels = true;
+  modelStatus("正在读取图片模型…");
+  controls();
+  try {
+    const { models } = await bridge.apiPost("dashboard/openai-models", {});
+    if (requestId !== modelRequestId) return;
+    if (!Array.isArray(models)) throw new Error("图片模型目录的返回格式有误。");
+    openAIModels = models;
+    showOpenAIModels();
+    modelStatus(models.length
+      ? `已读取 ${models.length} 个图片模型。实际出图权限以调用结果为准。`
+      : "此 API Key 的模型目录未返回图片模型。");
+  } catch (error) {
+    if (requestId !== modelRequestId) return;
+    openAIModels = [];
+    showOpenAIModels();
+    modelStatus(error.message || "读取图片模型失败，请重试。", true);
+  } finally {
+    if (requestId === modelRequestId) {
+      loadingModels = false;
+      controls();
+    }
+  }
 }
 
 function formHints() {
@@ -45,6 +91,8 @@ function controls() {
   const blocked = !connected || operationPending || !current;
   const busy = current?.busy || current?.login_pending;
   $("settings-fields").disabled = blocked;
+  $("refresh-openai-models").disabled = blocked || !current?.openai_key_configured || loadingModels
+    || Boolean($("openai_api_key").value.trim()) || $("clear-openai-key").checked;
   $("save").disabled = blocked || !dirty || busy || current?.active_tasks > 0;
   $("reset").disabled = blocked || !dirty;
   $("refresh").disabled = blocked || busy;
@@ -57,8 +105,16 @@ function controls() {
 }
 
 function render(state, resetForm = false) {
+  const keyChanged = state.openai_key_revision !== current?.openai_key_revision
+    || state.openai_key_configured !== current?.openai_key_configured;
   current = state;
+  if (keyChanged) {
+    modelRequestId++;
+    loadingModels = false;
+    openAIModels = [];
+  }
   if (resetForm) fillForm(state.settings);
+  else if (keyChanged) showOpenAIModels();
   const labels = {unknown: "尚未检查", signed_out: "尚未登录", logged_in: "已连接 Codex", starting: "正在获取设备码", waiting: "等待完成授权", error: "登录未完成"};
   $("account-status").textContent = labels[state.account.status] || "状态待确认";
   $("account-message").textContent = state.account.message;
@@ -84,6 +140,10 @@ function render(state, resetForm = false) {
     $("openai_api_key").disabled = false;
   }
   renderQuota(state);
+  if (keyChanged) {
+    if (state.openai_key_configured) void loadOpenAIModels();
+    else modelStatus("保存 API Key 后可读取图片模型。");
+  }
   controls();
 }
 
@@ -237,6 +297,7 @@ $("reset").addEventListener("click", () => { fillForm(current.settings); control
 $("login").addEventListener("click", () => { void action("login"); });
 $("refresh").addEventListener("click", () => { void action("refresh"); });
 $("refresh-quota").addEventListener("click", () => { void action("quota"); });
+$("refresh-openai-models").addEventListener("click", () => { void loadOpenAIModels(); });
 $("logout").addEventListener("click", () => { void action("logout"); });
 $("cancel").addEventListener("click", () => { void action("cancel"); });
 $("copy-code").addEventListener("click", () => { void copyField("device-code"); });

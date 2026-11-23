@@ -2,7 +2,7 @@
 
 在 AstrBot 的“扩展功能 → Codex 绘图”中管理 Codex 订阅账号和 OpenAI API 绘图。机器人通过同一组聊天命令回传图片。Codex 模式可用统一账号或每人独立账号。
 
-**版本 0.8.1 支持在插件配置中填写 OpenAI API Key。** 两种绘图模式都支持文生图、单图编辑、出图比例、重绘和临时图库。真实账号和消息平台联调仍待完成。
+**版本 0.8.2 支持读取 OpenAI 图片模型并在扩展页面选择。** 两种绘图模式都支持文生图、单图编辑、出图比例、重绘和临时图库。真实账号和消息平台联调仍待完成。
 
 ## 运行条件
 
@@ -16,10 +16,10 @@
 
 在 AstrBot **插件 → 安装插件（＋）→ 从链接安装** 中填写 `https://github.com/3070476390/astrbot_plugin_codex_images`。也可以从 GitHub Releases 下载 ZIP，再在 AstrBot 中从文件安装。
 
-- [下载 v0.8.1 安装包](https://github.com/3070476390/astrbot_plugin_codex_images/releases/download/v0.8.1/astrbot_plugin_codex_images-v0.8.1.zip)
+- [下载 v0.8.2 安装包](https://github.com/3070476390/astrbot_plugin_codex_images/releases/download/v0.8.2/astrbot_plugin_codex_images-v0.8.2.zip)
 - [查看所有版本和安装包](https://github.com/3070476390/astrbot_plugin_codex_images/releases)
 
-1. 将安装包上传到 AstrBot 插件管理的本地安装入口。从当前源码运行 `python scripts/build_zip.py` 可在 `dist/` 生成 v0.8.1 安装包。手动放置源码时，目录为 `data/plugins/astrbot_plugin_codex_images/`，`main.py`、`metadata.yaml` 和 `views/` 应位于该目录顶层。
+1. 将安装包上传到 AstrBot 插件管理的本地安装入口。从当前源码运行 `python scripts/build_zip.py` 可在 `dist/` 生成 v0.8.2 安装包。手动放置源码时，目录为 `data/plugins/astrbot_plugin_codex_images/`，`main.py`、`metadata.yaml` 和 `views/` 应位于该目录顶层。
 2. 插件使用 Pillow 和 HTTPX，AstrBot 4.29.4 已包含这些依赖。
 3. 使用 Codex 订阅时，在插件配置中填写 `codex_command`，Linux 通常为 `codex` 或其绝对路径。Windows 使用原生 `codex.exe` 的完整路径。
 4. 重载插件并刷新 AstrBot 后台，左侧“扩展功能”中会出现 **Codex 绘图**。也可通过插件详情页打开 `dashboard` 视图。
@@ -60,10 +60,12 @@
 ### OpenAI API 模式
 
 1. 在 **插件 → Codex 绘图 → 配置**，或 **扩展功能 → Codex 绘图 → 绘图设置 → OpenAI API 绘图** 填写 OpenAI API Key。此前通过环境变量配置的部署，升级后需要在这里重新填写密钥。
-2. 打开 **扩展功能 → Codex 绘图 → 绘图设置 → OpenAI API 绘图**，启用 **允许切换到 API 模式** 并保存。默认模型为 `gpt-image-2.6-flare`，可改为 API 项目有权使用的 GPT Image 模型，默认质量为中。
+2. 打开 **扩展功能 → Codex 绘图 → 绘图设置 → OpenAI API 绘图**。保存密钥后，图片模型下拉列表会显示该 API 项目可见的 GPT Image 模型，也可手动刷新。选择模型，启用 **允许切换到 API 模式**，再保存。默认模型为 `gpt-image-2.6-flare`，默认质量为中。
 3. 有绘图权限的用户发送 `/codex模式 API`，然后照常使用 `/codex画图`、`/codex改图` 或 `/codex重绘`。发送 `/codex模式 Codex` 返回订阅模式。插件按平台实例和用户保存选择，首次使用默认为 Codex。
 
 扩展页面只显示密钥的配置状态。留空后保存会保留现有密钥，填写新值会更换，勾选 **清除已保存的密钥** 后保存会移除。使用 AstrBot 原生插件配置时，可以清空密钥字段后保存。密钥由 AstrBot 保存到服务器的插件配置文件中，密码字段的掩码不加密文件内容。
+
+读取列表使用 OpenAI 的模型目录接口。插件按模型 ID 筛选兼容的图像模型，并跳过已停用的型号。查询目录无需发起出图请求，出图权限以实际调用结果为准。当前配置未出现在返回列表中时会保留，管理员可选择其他模型后保存。
 
 API 模式直接调用 OpenAI Images API，文生图使用 `/v1/images/generations`，图生图使用 `/v1/images/edits`。用量计入管理员的 API 项目，由管理员在 [OpenAI API 用量页](https://platform.openai.com/usage) 查看。已有名单、所有用户开关和群聊开关都适用于 API 绘图。关闭 API 开关后，已选择 API 的用户可手动切回 Codex。插件每次只发送一次收费请求，同时处理一个 API 绘图任务。任务取消或超时后，已提交给服务端的请求仍可能计费。
 

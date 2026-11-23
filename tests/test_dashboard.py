@@ -42,22 +42,53 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("openai_api_key", state["settings"])
         self.assertNotIn("test-only-key", str(state))
         self.assertNotIn("test-only-key", repr(self.plugin.service.settings))
+        key_revision = state["openai_key_revision"]
         with self.assertRaisesRegex(Exception, "模型 ID"):
             await self.controller.save_settings({"openai_image_model": "sk-secret"})
         self.assertEqual(self.plugin.service.settings.openai_image_model, "gpt-image-2")
 
         await self.controller.save_settings({"openai_image_quality": "medium"})
         self.assertEqual(self.plugin.config.saved["openai_api_key"], "test-only-key")
+        self.assertEqual(self.controller.state()["openai_key_revision"], key_revision)
         with patch.object(self.plugin.config, "save_config", side_effect=OSError("disk full")):
             with self.assertRaisesRegex(Exception, "保存失败"):
                 await self.controller.save_settings({"openai_api_key": "replacement-key"})
         self.assertEqual(self.plugin.config["openai_api_key"], "test-only-key")
         self.assertEqual(self.plugin.service.settings.openai_api_key, "test-only-key")
-        await self.controller.save_settings({"openai_api_key": "replacement-key"})
+        self.assertEqual(self.controller.state()["openai_key_revision"], key_revision)
+        replacement = await self.controller.save_settings({"openai_api_key": "replacement-key"})
         self.assertEqual(self.plugin.service.settings.openai_api_key, "replacement-key")
+        self.assertNotEqual(replacement["openai_key_revision"], key_revision)
         state = await self.controller.save_settings({"openai_api_key": ""})
         self.assertFalse(state["openai_key_configured"])
         self.assertEqual(self.plugin.config.saved["openai_api_key"], "")
+        self.assertNotEqual(state["openai_key_revision"], replacement["openai_key_revision"])
+
+    async def test_catalog_discards_results_if_key_was_replaced_during_lookup(self):
+        plugin_error = sys.modules["plugin_under_test.codex_images.errors"].PluginError
+        await self.controller.save_settings({"openai_api_key": "old-key"})
+        started = asyncio.Event()
+        finish = asyncio.Event()
+
+        async def list_models(settings):
+            self.assertEqual(settings.openai_api_key, "old-key")
+            started.set()
+            await finish.wait()
+            return ["gpt-image-2"]
+
+        self.plugin.service.api.list_models = list_models
+        lookup = asyncio.create_task(self.controller.list_openai_models())
+        try:
+            await asyncio.wait_for(started.wait(), timeout=5)
+            await asyncio.wait_for(
+                self.controller.save_settings({"openai_api_key": "new-key"}), timeout=5,
+            )
+            finish.set()
+            with self.assertRaises(plugin_error):
+                await lookup
+        finally:
+            lookup.cancel()
+            await asyncio.gather(lookup, return_exceptions=True)
 
     async def test_invalid_settings_are_atomic(self):
         original = dict(self.plugin.config)
@@ -207,17 +238,31 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
                                         register_web_api=lambda *args: routes.append(args))
         endpoint = module.DashboardAPI(context, self.controller)
         endpoint.register()
-        self.assertEqual(len(routes), 10)
+        self.assertEqual(len(routes), 11)
+        _, list_models, methods, _ = next(
+            route for route in routes if route[0].endswith("/dashboard/openai-models")
+        )
+        self.assertEqual(methods, ["POST"])
+        self.plugin.service.api.list_models = AsyncMock(return_value=["gpt-image-2"])
         for username in [None, "another-user", "api_key:123"]:
             request.username = username
             for _, handler, _, _ in routes:
                 result = await handler()
                 self.assertEqual(result[0], 403)
         request.json.assert_not_awaited()
+        self.plugin.service.api.list_models.assert_not_awaited()
         request.username = "owner"
         self.assertEqual((await endpoint.state())[0], 200)
         self.assertEqual((await endpoint.settings())[0], 200)
         self.assertEqual(self.plugin.service.settings.model, "test")
+        settings = await self.controller.save_settings({"openai_api_key": "stored-key"})
+        self.assertFalse(settings["settings"]["openai_api_enabled"])
+        request.json.reset_mock()
+        request.json.return_value = {"openai_api_key": "unsaved-key"}
+        self.assertEqual(await list_models(), (200, {"models": ["gpt-image-2"]}))
+        self.plugin.service.api.list_models.assert_awaited_once_with(self.plugin.service.settings)
+        self.assertEqual(self.plugin.service.settings.openai_api_key, "stored-key")
+        request.json.assert_not_awaited()
         from PIL import Image
 
         path = Path(self.temp.name) / "generated.png"

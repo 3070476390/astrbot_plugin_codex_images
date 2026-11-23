@@ -1,7 +1,7 @@
 name: astrbot_plugin_codex_images
 display_name: Codex 绘图
 desc: 支持 Codex 订阅和 OpenAI API 绘图，提供文生图、图生图、重绘和临时图库。
-version: v0.8.1
+version: v0.8.2
 author: snowy
 repo: https://github.com/3070476390/astrbot_plugin_codex_images
 astrbot_version: ">=4.29.4,<5"

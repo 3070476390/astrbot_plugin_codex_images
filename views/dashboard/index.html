@@ -8,7 +8,7 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand"><span class="brand-icon" aria-hidden="true">✦</span><div><h1>Codex 绘图</h1><p>绘图设置与图库</p></div><span class="version">v0.8.1</span></div>
+    <div class="brand"><span class="brand-icon" aria-hidden="true">✦</span><div><h1>Codex 绘图</h1><p>绘图设置与图库</p></div><span class="version">v0.8.2</span></div>
     <div class="connection"><span id="connection-dot" class="dot"></span><span id="connection-text">正在连接插件…</span></div>
   </header>
   <main>
@@ -82,8 +82,15 @@
                   <input id="clear-openai-key" type="checkbox"> 清除已保存的密钥
                 </label>
               </div>
-              <div class="two-columns">
-                <div class="field"><label for="openai_image_model">图像模型</label><input id="openai_image_model" name="openai_image_model" placeholder="gpt-image-2.6-flare" maxlength="100" spellcheck="false" required></div>
+              <div class="two-columns openai-model-fields">
+                <div class="field">
+                  <label for="openai_image_model">图像模型</label>
+                  <div class="openai-model-control">
+                    <select id="openai_image_model" name="openai_image_model" aria-describedby="openai-model-status" required></select>
+                    <button id="refresh-openai-models" type="button" aria-controls="openai_image_model" disabled>刷新模型</button>
+                  </div>
+                  <p id="openai-model-status" class="hint" role="status">保存 API Key 后可读取图片模型。</p>
+                </div>
                 <div class="field"><label for="openai_image_quality">出图质量</label><select id="openai_image_quality" name="openai_image_quality"><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select></div>
               </div>
             </fieldset>

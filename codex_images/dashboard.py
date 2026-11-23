@@ -3,6 +3,7 @@ import asyncio
 import copy
 import json
 from pathlib import Path
+from uuid import uuid4
 
 from .errors import PluginError
 from .service import Settings, user_key
@@ -18,6 +19,7 @@ class DashboardController:
         self.lock = asyncio.Lock()
         self.account = {"status": "unknown", "message": "点击刷新检查统一账号的登录状态。"}
         self.quota = None
+        self._openai_key_revision = uuid4().hex
 
     @property
     def service(self):
@@ -35,10 +37,11 @@ class DashboardController:
 
     def state(self):
         return {
-            "version": "0.8.1",
+            "version": "0.8.2",
             "settings": self._config_values(),
             "account": dict(self.account),
             "openai_key_configured": bool(self.service.settings.openai_api_key),
+            "openai_key_revision": self._openai_key_revision,
             "quota": copy.deepcopy(self.quota) if self.plugin.account_mode == "shared" else None,
             "login_pending": self.login_pending,
             "busy": SHARED_KEY in self.service.sessions or SHARED_KEY in self.plugin.image_owners,
@@ -76,6 +79,13 @@ class DashboardController:
             except Exception:
                 self.quota = {"status": "error", "message": "额度查询失败，请检查 Codex 配置和网络。"}
             return self.state()
+
+    async def list_openai_models(self):
+        revision = self._openai_key_revision
+        models = await self.service.api.list_models(self.service.settings)
+        if revision != self._openai_key_revision:
+            raise PluginError("OpenAI API Key 已更新，请重新读取图片模型。")
+        return {"models": models}
 
     async def start_login(self):
         async with self.lock:
@@ -172,6 +182,8 @@ class DashboardController:
             self.plugin.config.clear()
             self.plugin.config.update(old)
             raise PluginError("配置保存失败，当前运行设置未更改。") from exc
+        if self.service.settings.openai_api_key != settings.openai_api_key:
+            self._openai_key_revision = uuid4().hex
         self.service.settings = settings
         self.quota = None
 

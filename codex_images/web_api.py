@@ -19,6 +19,7 @@ class DashboardAPI:
             ("login", "POST", self.login), ("logout", "POST", self.logout),
             ("cancel", "POST", self.cancel), ("settings", "POST", self.settings),
             ("quota", "POST", self.quota),
+            ("openai-models", "POST", self.openai_models),
             ("gallery", "GET", self.gallery),
             ("gallery-preview", "GET", self.gallery_preview),
             ("gallery-download", "GET", self.gallery_download),
@@ -50,6 +51,9 @@ class DashboardAPI:
 
     async def quota(self):
         return await self._run(self.controller.refresh_quota)
+
+    async def openai_models(self):
+        return await self._run(self.controller.list_openai_models)
 
     async def login(self):
         return await self._run(self.controller.start_login)
